@@ -1,0 +1,119 @@
+# ========================================
+# Python
+# ========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ========================================
+# Virtual Environment
+# ========================================
+.venv/
+venv/
+ENV/
+env/
+
+# ========================================
+# Environment Variables & Secrets
+# ========================================
+.env
+.env.local
+.env.*.local
+
+# Streamlit Secrets (NEVER commit this!)
+.streamlit/secrets.toml
+
+# ========================================
+# IDEs & Editors
+# ========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ========================================
+# OS Files
+# ========================================
+.DS_Store
+Thumbs.db
+
+# ========================================
+# Jupyter Notebook
+# ========================================
+.ipynb_checkpoints
+
+# ========================================
+# Logs & Debug Output
+# ========================================
+*.log
+debug_output.txt
+
+# ========================================
+# Cache Directories
+# ========================================
+cache/
+*.pyc
+
+# FastF1 cache (can be large, regenerated on deployment)
+.fastf1_cache/
+f1_cache/
+
+# Test execution logs
+ExecutionLogs/
+
+# ========================================
+# Model Files (large binary files)
+# ========================================
+models/saved/*.pkl
+models/saved/*.joblib
+models/saved/*.h5
+models/saved/*.pt
+models/saved/*.pth
+
+# ========================================
+# Data Files (if large)
+# ========================================
+data/raw/*.csv
+data/processed/*.csv
+*.parquet
+
+# ========================================
+# Sample UI / Development Artifacts
+# ========================================
+sample_ui/
+
+# ========================================
+# Test & Debug Scripts (root level only)
+# ========================================
+# Keep these locally for development, exclude from deployment
+/test_ai.py
+/test_simulation.py
+/check_db.py
+/debug_track_map.py
+
+# ========================================
+# Temporary Files
+# ========================================
+*.tmp
+*.bak
+gemini_list.txt
+races_keys.txt

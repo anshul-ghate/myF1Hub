@@ -1,0 +1,23 @@
+# Streamlit Configuration for F1 HUB (Production-Ready)
+
+[theme]
+primaryColor = "#FF1801"
+backgroundColor = "#0B0C10"
+secondaryBackgroundColor = "#1F2833"
+textColor = "#FFFFFF"
+font = "sans serif"
+
+[server]
+headless = true
+port = 8501
+enableCORS = false
+enableXsrfProtection = true
+maxUploadSize = 200
+
+[browser]
+gatherUsageStats = false
+serverAddress = "0.0.0.0"
+
+[client]
+showErrorDetails = false
+toolbarMode = "minimal"
