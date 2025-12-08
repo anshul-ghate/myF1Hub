@@ -29,7 +29,7 @@ if "agent" not in st.session_state:
 # Clear Chat Button
 col1, col2 = st.columns([6, 1])
 with col2:
-    if st.button("🗑️ Clear Chat", type="secondary", use_container_width=True):
+    if st.button("🗑️ Clear Chat", type="secondary", width='stretch'):
         # Clear messages
         st.session_state.messages = []
         st.session_state.messages.append({"role": "assistant", "content": "Radio check. Olof here. What data do you need?"})

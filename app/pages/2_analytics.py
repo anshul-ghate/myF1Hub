@@ -113,7 +113,7 @@ else:
                 fig_box = px.box(clean_laps, x=driver_col, y='lap_time_s', 
                                  title="Lap Time Distribution by Driver",
                                  labels={'lap_time_s': 'Lap Time (s)', driver_col: 'Driver'})
-            st.plotly_chart(fig_box, use_container_width=True)
+            st.plotly_chart(fig_box, width='stretch')
 
             # 2. Tyre Strategy
             st.subheader("Tyre Strategy")
@@ -125,7 +125,7 @@ else:
                                       title="Tyre Compound Usage per Lap",
                                       labels={lap_num_col: 'Lap Number', driver_col: 'Driver'})
                 fig_tyre.update_traces(marker=dict(size=8))
-                st.plotly_chart(fig_tyre, use_container_width=True)
+                st.plotly_chart(fig_tyre, width='stretch')
             else:
                 st.info("Tyre compound data not available for this race.")
 
@@ -158,7 +158,7 @@ else:
                                          paper_bgcolor='rgba(0,0,0,0)',
                                          plot_bgcolor='rgba(0,0,0,0)',
                                          font=dict(color='white'))
-                    st.plotly_chart(fig_3d, use_container_width=True)
+                    st.plotly_chart(fig_3d, width='stretch')
                     
                 else: # Gear Shift Map (Keep 2D for clarity or make 3D)
                     # Let's keep Gear Shift as 2D Matplotlib for now as it's cleaner for discrete segments, 
@@ -173,7 +173,7 @@ else:
                                          paper_bgcolor='rgba(0,0,0,0)',
                                          plot_bgcolor='rgba(0,0,0,0)',
                                          font=dict(color='white'))
-                    st.plotly_chart(fig_3d, use_container_width=True)
+                    st.plotly_chart(fig_3d, width='stretch')
                 
             else:
                 st.error("Failed to load FastF1 session data.")
@@ -211,7 +211,7 @@ else:
                         
                         fig_comp.update_layout(title=f"Speed Comparison: {driver1} vs {driver2}", 
                                                xaxis_title="Distance (m)", yaxis_title="Speed (km/h)")
-                        st.plotly_chart(fig_comp, use_container_width=True)
+                        st.plotly_chart(fig_comp, width='stretch')
                         
                         # Plot Delta
                         fig_delta = go.Figure()
@@ -220,7 +220,7 @@ else:
                         
                         fig_delta.update_layout(title=f"Time Delta: {driver2} relative to {driver1}", 
                                                 xaxis_title="Distance (m)", yaxis_title="Delta (s)")
-                        st.plotly_chart(fig_delta, use_container_width=True)
+                        st.plotly_chart(fig_delta, width='stretch')
                         
                     else:
                         st.warning("One or both drivers do not have a valid fastest lap.")

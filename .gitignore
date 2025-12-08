@@ -117,3 +117,11 @@ sample_ui/
 *.bak
 gemini_list.txt
 races_keys.txt
+
+# ========================================
+# Large Data & Recent Logs
+# ========================================
+ingest_2025_log.txt
+debug_log.txt
+f1_cache_dynasty/
+data/computed_telemetry/

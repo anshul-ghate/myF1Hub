@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.db import get_supabase_client
 from utils.populate_schedule import populate_schedule
 from data.ingest_bulk import ingest_bulk_history
-from models.train_lap_model import train_model
+from models.train_model import train_model
 
 # Configure Logging
 logging.basicConfig(

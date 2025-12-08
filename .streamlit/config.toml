@@ -10,7 +10,7 @@ font = "sans serif"
 [server]
 headless = true
 port = 8501
-enableCORS = false
+enableCORS = true
 enableXsrfProtection = true
 maxUploadSize = 200
 
@@ -21,3 +21,4 @@ serverAddress = "0.0.0.0"
 [client]
 showErrorDetails = false
 toolbarMode = "minimal"
+showSidebarNavigation = false

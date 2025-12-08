@@ -1,224 +1,317 @@
-# F1 Race Prediction & Analytics Platform
+<div align="center">
 
-A comprehensive Formula 1 race prediction and analytics application powered by machine learning, featuring real-time data ingestion, Monte Carlo simulations, and interactive visualizations.
+# 🏎️ PitWall AI
 
-## 🏎️ Features
+### AI-Powered Formula 1 Race Strategy & Prediction Platform
 
-- **Race Predictions**: Monte Carlo simulation-based predictions for upcoming F1 races
-  - Two-stage prediction system (qualifying + race results)
-  - Probabilistic outcomes with win/podium percentages
-  - Driver performance modeling with historical data
+[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.28+-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://streamlit.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
+[![FastF1](https://img.shields.io/badge/FastF1-Powered-E10600?style=for-the-badge)](https://github.com/theOehrly/Fast-F1)
 
-- **Historical Analytics**: Deep dive into past race data
-  - Lap time analysis and visualizations
-  - Tire strategy insights
-  - Position progression tracking
+*Advanced machine learning models combining LightGBM, XGBoost, and Monte Carlo simulations to predict F1 race outcomes with statistical confidence.*
 
-- **Live Race Monitoring**: Real-time race tracking and visualization
-  - Live timing data integration
-  - Dynamic position updates
-  - Interactive race charts
+---
 
-- **Automated Data Pipeline**: Scheduled updates for race results and driver standings
-  - FastF1 API integration
-  - Supabase database storage
-  - Incremental data ingestion
+</div>
 
-## 📋 Prerequisites
+## 📸 Screenshots
 
-- Python 3.9 or higher
+<div align="center">
+
+### Dashboard Overview
+![Home Dashboard](docs/screenshots/home_dashboard.png)
+
+### Season Central - Championship Standings & Trends
+![Season Central](docs/screenshots/season_central.png)
+
+### Race Analytics - Deep Dive Into Race Data
+![Race Analytics](docs/screenshots/race_analytics.png)
+
+### Race Predictions - Monte Carlo Simulations
+![Race Predictions](docs/screenshots/race_predictions.png)
+
+### Past Races - Historical Race Replay
+![Past Races](docs/screenshots/past_races.png)
+
+</div>
+
+---
+
+## ✨ Features
+
+### 🎯 Race Predictions
+- **Monte Carlo Simulation Engine** - Run thousands of simulations for probabilistic race outcome predictions
+- **Hybrid ML Models** - Ensemble of LightGBM Ranker and XGBoost Regressor for maximum accuracy
+- **Weather-Aware Predictions** - Adjust predictions based on wet/dry conditions
+- **Confidence Intervals** - Statistical confidence levels for all predictions
+
+### 📊 Season Analytics
+- **Championship Progression** - Interactive charts showing driver and constructor standings over time
+- **Teammate Comparisons** - Head-to-head performance analysis within teams
+- **Points Trajectory** - Visualize championship battles and momentum shifts
+
+### 🏁 Race Analytics
+- **Lap Time Analysis** - Detailed lap-by-lap performance breakdowns
+- **Tire Strategy Insights** - Compound degradation and pit stop optimization
+- **Position Progression** - Interactive race position charts
+- **Sector Performance** - Track segment analysis with driver comparisons
+
+### 📡 Live Race Monitor
+- **Real-Time Timing** - Live position and lap time updates during races
+- **Dynamic Track Map** - Visual representation of driver positions on track
+- **Gap Analysis** - Real-time gap calculations between drivers
+- **Pit Stop Alerts** - Instant notifications for pit activity
+
+### 🔬 Race Engineer AI
+- **AI-Powered Insights** - Natural language race strategy recommendations
+- **Historical Pattern Analysis** - Data-driven strategy suggestions based on past races
+- **What-If Scenarios** - Explore alternative strategy outcomes
+
+### 📜 Past Race Replay
+- **Historical Race Data** - Access complete data from past F1 seasons (2018+)
+- **Race Reconstruction** - Step-by-step replay of historical races
+- **Performance Comparison** - Compare driver performances across different races
+
+---
+
+## 🧠 Model Architecture
+
+PitWall AI employs a sophisticated multi-model ensemble approach:
+
+### DynastyEngine (LightGBM Ranker)
+The core prediction engine using a **LambdaRank** objective optimized for ranking race positions:
+
+- **Elo Rating System** - Dynamic driver and team ratings updated after each race
+- **Track DNA Classification** - Circuit-specific characteristics (High-Speed, Technical, Street, Balanced)
+- **Feature Engineering Pipeline**:
+  - Driver Elo ratings (individual performance tracking)
+  - Team Elo ratings (constructor performance)
+  - Track type encoding (one-hot encoded circuit characteristics)
+  - Overtaking difficulty coefficient
+  - Weather conditions encoding
+
+### HybridPredictor (XGBoost Ensemble)
+An enhanced prediction layer combining multiple models:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    HybridPredictor Pipeline                  │
+├─────────────────────────────────────────────────────────────┤
+│  Input Features                                              │
+│  ├── Driver/Team Elo Ratings                                │
+│  ├── Track DNA (Type, Overtaking Score)                     │
+│  ├── Recent Form (Last 3 races)                             │
+│  ├── Grid Position                                          │
+│  └── Weather Forecast                                        │
+├─────────────────────────────────────────────────────────────┤
+│  Models                                                      │
+│  ├── LightGBM Ranker (position ranking)                     │
+│  ├── XGBoost Regressor (expected position)                  │
+│  └── Residual Sampling (uncertainty quantification)          │
+├─────────────────────────────────────────────────────────────┤
+│  Monte Carlo Simulation (N=5000)                             │
+│  └── Produces probability distributions for each position   │
+├─────────────────────────────────────────────────────────────┤
+│  Output                                                      │
+│  ├── Expected Finish Position                               │
+│  ├── Win Probability %                                      │
+│  ├── Podium Probability %                                   │
+│  └── Points Expectation                                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Track DNA System
+Each circuit is classified with unique characteristics:
+
+| Track Type | Characteristics | Example Circuits |
+|------------|-----------------|------------------|
+| **High_Speed** | Long straights, high top speeds | Monza, Spa, Las Vegas |
+| **Technical** | Complex corners, requires precision | Monaco, Singapore, Hungary |
+| **Street_Fast** | Street circuits with fast sections | Jeddah, Melbourne |
+| **Balanced** | Mix of speed and technical sections | Bahrain, Abu Dhabi |
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Python 3.9+
 - Supabase account (for database storage)
 - Google AI API key (optional, for AI-powered insights)
 
-## 🚀 Installation
+### Installation
 
-### 1. Clone the Repository
-
+1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/f1-prediction-platform.git
-cd f1-prediction-platform
+git clone https://github.com/anshul-ghate/PitWall-AI.git
+cd PitWall-AI
 ```
 
-### 2. Set Up Virtual Environment
-
-**Windows:**
+2. **Create virtual environment**
 ```bash
+# Windows
 python -m venv .venv
 .\.venv\Scripts\Activate
-```
 
-**macOS/Linux:**
-```bash
+# macOS/Linux
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3. Install Dependencies
-
+3. **Install dependencies**
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Configure Environment Variables
-
-Create a `.env` file in the project root (use `.env.example` as template):
-
-```env
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_KEY=your_supabase_service_role_key
-GOOGLE_API_KEY=your_google_ai_api_key  # Optional
+4. **Configure environment**
+```bash
+cp .env.example .env
+# Edit .env with your credentials
 ```
 
-### 5. Set Up Database
-
-Set up your Supabase database with the required tables:
-- `races`
-- `drivers`
-- `results`
-- `laps`
-- `pit_stops`
-- `qualifying`
-
-See `docs/database_schema.md` (if available) for detailed schema information.
-
-## 💻 Usage
-
-### Run the Web Application
-
+5. **Run the application**
 ```bash
 streamlit run app/main.py
 ```
 
 The app will be available at `http://localhost:8501`
 
-### Run Data Pipeline
-
-To fetch and update race data:
-
-```bash
-python run_pipeline.py
-```
-
-### Automated Updates
-
-Set up scheduled pipeline runs using:
-```bash
-python scripts/auto_update.py
-```
+---
 
 ## 📁 Project Structure
 
 ```
-F1Proj/
-├── app/                    # Streamlit web application
-│   ├── main.py            # Main app entry point
-│   └── pages/             # Multi-page app pages
-│       ├── 1_analytics.py
-│       ├── 2_predictions.py
-│       └── 3_live_monitor.py
-├── models/                # ML models
-│   ├── simulation.py      # Race simulator
-│   └── saved/            # Trained model files
-├── scripts/              # Automation scripts
-│   └── auto_update.py    # Scheduled data updates
-├── utils/                # Utility modules
-│   ├── db.py            # Database connections
-│   ├── race_utils.py    # Race data utilities
-│   └── ai.py            # AI integrations
-├── data/                 # Data storage (gitignored)
-├── cache/               # Cache directory (gitignored)
-├── requirements.txt     # Python dependencies
-├── .env.example        # Environment template
-└── README.md           # This file
+PitWall-AI/
+├── app/                        # Streamlit web application
+│   ├── main.py                # Main dashboard entry point
+│   ├── components/            # Reusable UI components
+│   │   ├── sidebar.py        # Navigation sidebar
+│   │   ├── race_replay.py    # Race replay component
+│   │   └── charts.py         # Chart utilities
+│   └── pages/                 # Multi-page app
+│       ├── 1_Season_Central.py
+│       ├── 2_analytics.py
+│       ├── 3_predictions.py
+│       ├── 4_live_monitor.py
+│       ├── 5_race_engineer.py
+│       └── 6_past_races.py
+├── models/                     # ML models
+│   ├── dynasty_engine.py      # LightGBM Ranker + Elo system
+│   ├── hybrid_predictor.py    # XGBoost ensemble predictor
+│   ├── simulation.py          # Monte Carlo simulation engine
+│   ├── feature_engineering.py # Feature extraction pipeline
+│   └── saved/                 # Trained model artifacts
+├── utils/                      # Utility modules
+│   ├── db.py                  # Supabase database connection
+│   ├── race_utils.py          # Race data utilities
+│   └── ai.py                  # Google AI integration
+├── scripts/                    # Automation scripts
+│   ├── auto_update.py         # Scheduled data updates
+│   └── check_deployment.py    # Deployment verification
+├── docs/                       # Documentation
+│   └── screenshots/           # Application screenshots
+├── tests/                      # Test suite
+├── requirements.txt           # Python dependencies
+├── .env.example              # Environment template
+└── README.md                  # This file
 ```
+
+---
 
 ## 🔧 Configuration
 
+### Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `SUPABASE_URL` | Supabase project URL | ✅ |
+| `SUPABASE_KEY` | Supabase service role key | ✅ |
+| `GOOGLE_API_KEY` | Google AI API key | Optional |
+
 ### Model Training
 
-To retrain the lap time prediction model:
+To retrain the prediction models with latest data:
 
-```python
-# Coming soon: model training script
+```bash
 python models/train_model.py
 ```
 
-### Customizing Predictions
+---
 
-Edit `models/simulation.py` to adjust:
-- Driver performance tiers
-- Tire strategy parameters
-- Safety car probabilities
-- Monte Carlo simulation count
+## 📊 Technologies
 
-## 📊 Technologies Used
+<div align="center">
 
-- **Frontend**: Streamlit
-- **Data Processing**: Pandas, NumPy
-- **ML**: Scikit-learn, XGBoost
-- **Visualization**: Plotly, Matplotlib, Seaborn
-- **Database**: Supabase (PostgreSQL)
-- **F1 Data**: FastF1 API
-- **AI**: Google Generative AI (optional)
+| Category | Technologies |
+|----------|-------------|
+| **Frontend** | Streamlit, Plotly, Matplotlib |
+| **ML Models** | LightGBM, XGBoost, Scikit-learn |
+| **Data Processing** | Pandas, NumPy |
+| **F1 Data** | FastF1 API |
+| **Database** | Supabase (PostgreSQL) |
+| **AI Features** | Google Generative AI |
+
+</div>
+
+---
+
+## 🚀 Deployment
+
+### Streamlit Community Cloud (Recommended)
+
+1. Push your code to GitHub
+2. Visit [share.streamlit.io](https://share.streamlit.io)
+3. Connect your repository
+4. Set main file: `app/main.py`
+5. Add secrets in app settings:
+   ```toml
+   GOOGLE_API_KEY = "your_key"
+   SUPABASE_URL = "your_url"
+   SUPABASE_KEY = "your_key"
+   ```
+6. Deploy!
+
+For detailed instructions, see [DEPLOYMENT.md](DEPLOYMENT.md)
+
+---
 
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## 📝 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## ⚠️ Disclaimer
-
-This application is for educational and entertainment purposes only. Predictions are based on historical data and statistical models and should not be used for betting or financial decisions.
-
-## 🚀 Deployment
-
-### Deploy to Streamlit Community Cloud (Free)
-
-1. **Push your code to GitHub**
-2. **Visit** [share.streamlit.io](https://share.streamlit.io)
-3. **Connect your GitHub repository**
-4. **Configure**:
-   - Main file: `app/main.py`
-   - Python version: 3.11
-5. **Add secrets** in app settings:
-   ```toml
-   GOOGLE_API_KEY = "your_key_here"
-   SUPABASE_URL = "your_url_here"
-   SUPABASE_KEY = "your_key_here"
-   ```
-6. **Deploy!**
-
-Your app will be live at: `https://your-app-name.streamlit.app`
-
-📖 **For detailed deployment instructions**, see [DEPLOYMENT.md](DEPLOYMENT.md)
-
-### Pre-Deployment Checklist
-
-Run the deployment readiness check:
-
-```bash
-python check_deployment.py
-```
-
-This will verify:
-- ✅ All required files are present
-- ✅ Dependencies are configured
-- ✅ Secrets are properly gitignored
-- ✅ Configuration is production-ready
-
-## 🙏 Acknowledgments
-
-- [FastF1](https://github.com/theOehrly/Fast-F1) for providing F1 data API
-- [Supabase](https://supabase.com/) for database infrastructure
-- Formula 1 community for inspiration
-
-## 📧 Contact
-
-For questions or support, please open an issue on GitHub.
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ---
 
-**Enjoy predicting F1 races! 🏁**
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## ⚠️ Disclaimer
+
+This application is for **educational and entertainment purposes only**. Predictions are based on historical data and statistical models and should not be used for betting or financial decisions.
+
+---
+
+## 🙏 Acknowledgments
+
+- [FastF1](https://github.com/theOehrly/Fast-F1) - Exceptional F1 data API
+- [Supabase](https://supabase.com/) - Database infrastructure
+- The Formula 1 community for inspiration
+
+---
+
+<div align="center">
+
+**Made with ❤️ for F1 fans**
+
+🏁 *Enjoy predicting F1 races!* 🏁
+
+</div>

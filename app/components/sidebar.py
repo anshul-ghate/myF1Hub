@@ -37,10 +37,13 @@ def render_sidebar():
                 st.rerun()
         
         st.divider()
-        st.markdown("### Navigation")
         
+        # Navigation
+        st.markdown("### Navigation")
         st.page_link("main.py", label="Home", icon="🏠")
-        st.page_link("pages/1_analytics.py", label="Analytics", icon="📊")
-        st.page_link("pages/2_predictions.py", label="Predictions", icon="🔮")
-        st.page_link("pages/3_live_monitor.py", label="Live Monitor", icon="📡")
-        st.page_link("pages/4_race_engineer.py", label="Race Engineer", icon="🤖")
+        st.page_link("pages/1_Season_Central.py", label="Season Central", icon="🏁")
+        st.page_link("pages/2_analytics.py", label="Analytics", icon="📊")
+        st.page_link("pages/3_predictions.py", label="Predictions", icon="🔮")
+        st.page_link("pages/4_live_monitor.py", label="Live Monitor", icon="📡")
+        st.page_link("pages/5_race_engineer.py", label="Race Engineer", icon="🤖")
+        st.page_link("pages/6_past_races.py", label="Past Races", icon="🏁")

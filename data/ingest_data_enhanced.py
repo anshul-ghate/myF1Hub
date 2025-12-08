@@ -13,6 +13,11 @@ fastf1.Cache.enable_cache('cache')
 supabase = get_supabase_client()
 logger = get_logger("DataIngestionEnhanced")
 
+# Configure Retries for FastF1/Requests
+from utils.api_config import configure_fastf1_retries
+configure_fastf1_retries()
+
+
 # Global In-Memory Cache to reduce DB reads
 # Structure: { 'table_name': { 'column_value': 'uuid' } }
 ID_CACHE = {
@@ -305,12 +310,18 @@ def ingest_enhanced_race_data(year, race_round):
 
     # 8. Results (Positions, Grid, Points)
     logger.info("Processing Results...")
+    print(f"   Processing results for {len(session.drivers)} drivers...")
     results_batch = []
     for drv in session.drivers:
-        if drv not in session.results['Abbreviation'].values: continue
+        if drv not in session.results['Abbreviation'].values: 
+            print(f"   Skipping {drv} (not in results)")
+            continue
+            
         d_info = session.get_driver(drv)
         d_id = driver_map.get(d_info['Abbreviation'])
-        if not d_id: continue
+        if not d_id: 
+            print(f"   Skipping {drv} (no ID)")
+            continue
         
         # Safe extraction of fields
         position = d_info.get('Position')
@@ -326,14 +337,25 @@ def ingest_enhanced_race_data(year, race_round):
         
         results_batch.append({
             'race_id': race_id,
-            'laps': int(d_info['ClassifiedPosition']) if str(d_info['ClassifiedPosition']).isdigit() else None # Approximate
+            'driver_id': d_id,
+            'position': position,
+            'grid': grid,
+            'points': points,
+            'status': status,
+            # 'team': d_info.get('TeamName', 'Unknown'), # Column missing in DB
+            'laps': int(d_info['ClassifiedPosition']) if str(d_info['ClassifiedPosition']).isdigit() else None
         })
         
     if results_batch:
         try:
-            supabase.table('race_results').upsert(results_batch, on_conflict='race_id, driver_id').execute()
+            print(f"   Upserting {len(results_batch)} results...")
+            data = supabase.table('race_results').upsert(results_batch, on_conflict='race_id, driver_id').execute()
+            print(f"   ✅ Upsert success! Data: {len(data.data) if data.data else 'No data returned'}")
         except Exception as e:
             logger.error(f"Error upserting results: {e}")
+            print(f"   ❌ Error upserting results: {e}")
+    else:
+        print("   ⚠️ No results to upsert.")
 
     # 7. Mark Ingestion as Complete
     supabase.table('races').update({'ingestion_complete': True}).eq('id', race_id).execute()

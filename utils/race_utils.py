@@ -1,12 +1,84 @@
-"""
-Utility functions for race selection and upcoming race detection.
-"""
+import fastf1
 import pandas as pd
 from datetime import datetime, timezone
+import streamlit as st
 from utils.db import get_supabase_client
+import matplotlib.pyplot as plt
+import io
+import base64
 
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# Initialize Supabase
 supabase = get_supabase_client()
 
+# Configure FastF1 Retries
+from utils.api_config import configure_fastf1_retries
+configure_fastf1_retries()
+
+@st.cache_data(ttl=86400)  # Cache for 24 hours
+def get_track_map_image(_event):
+    """
+    Generate a track map image for the given event.
+    Skips if data is not readily available to avoid hanging.
+    Note: _event uses underscore prefix to prevent Streamlit from hashing it for caching.
+    """
+    try:
+        event_location = _event['Location']
+        event_country = _event['Country']
+        event_name = _event['EventName']
+        current_year = _event['EventDate'].year
+        
+        # Try only current year - 1 to avoid long waits
+        year = current_year - 1
+        print(f"Attempting to load track map for {event_name} from {year}...")
+        
+        # Get schedule for this year
+        schedule_year = fastf1.get_event_schedule(year)
+        
+        # Try matching by Location first (most reliable)
+        matching_event = schedule_year[schedule_year['Location'] == event_location]
+        
+        # Fallback to Country match
+        if matching_event.empty:
+            matching_event = schedule_year[schedule_year['Country'] == event_country]
+        
+        if not matching_event.empty:
+            round_num = matching_event.iloc[0]['RoundNumber']
+            
+            # Try only Qualifying session (faster)
+            session = fastf1.get_session(year, round_num, 'Q')
+            session.load(laps=True, telemetry=True, weather=False, messages=False)
+            
+            # Get fastest lap telemetry
+            lap = session.laps.pick_fastest()
+            if lap is not None and not lap.empty:
+                pos = lap.get_telemetry().add_distance().add_relative_distance()
+                
+                # Create the plot
+                fig, ax = plt.subplots(figsize=(5, 3), facecolor='none')
+                ax.plot(pos['X'], pos['Y'], color='#FF1801', linewidth=2.5)
+                ax.axis('off')
+                ax.set_aspect('equal')
+                
+                # Save to buffer
+                buf = io.BytesIO()
+                fig.savefig(buf, format='svg', bbox_inches='tight', transparent=True)
+                buf.seek(0)
+                img_str = base64.b64encode(buf.getvalue()).decode('utf-8')
+                plt.close(fig)
+                
+                print(f"✓ Successfully loaded track map from {year}")
+                return f"data:image/svg+xml;base64,{img_str}"
+        
+        print(f"⚠ Could not generate track map for {event_name}")
+        return None
+        
+    except Exception as e:
+        print(f"❌ Error generating track map: {e}")
+        return None
 
 def get_next_upcoming_race():
     """
@@ -33,8 +105,9 @@ def get_next_upcoming_race():
                 if race_date.tzinfo is None:
                     race_date = race_date.tz_localize(timezone.utc)
                 
-                # Compare with current time
-                if race_date > now:
+                # Compare with current time + buffer for race day
+                # Allow race to show as "upcoming" for 24 hours after the midnight timestamp
+                if (race_date + pd.Timedelta(hours=24)) > now:
                     return race
         
         return None
@@ -113,3 +186,218 @@ def get_race_by_id(race_id):
     except Exception as e:
         print(f"Error getting race {race_id}: {e}")
         return None
+
+def get_current_standings(year=None):
+    """
+    Fetch current driver and constructor standings by aggregating results from all completed races.
+    """
+    if year is None:
+        year = datetime.now().year
+        
+    try:
+        # Get schedule
+        schedule = fastf1.get_event_schedule(year)
+        completed = schedule[schedule['EventDate'] < datetime.now()]
+        
+        driver_points = {}
+        driver_teams = {}
+        constructor_points = {}
+        
+        # Iterate through all completed rounds to sum points
+        for _, race in completed.iterrows():
+            try:
+                # Skip testing rounds (round 0 doesn't have sprint or race sessions)
+                if race['RoundNumber'] == 0:
+                    continue
+                    
+                # Check for Sprint
+                if 'Sprint' in race['Session3']: # Heuristic for Sprint weekend
+                     session = fastf1.get_session(year, race['RoundNumber'], 'Sprint')
+                     session.load(laps=False, telemetry=False, weather=False, messages=False)
+                     if not session.results.empty:
+                         for _, row in session.results.iterrows():
+                             driver = row['Abbreviation']
+                             team = row['TeamName']
+                             points = row['Points']
+                             
+                             driver_points[driver] = driver_points.get(driver, 0) + points
+                             constructor_points[team] = constructor_points.get(team, 0) + points
+
+                # Main Race
+                session = fastf1.get_session(year, race['RoundNumber'], 'R')
+                session.load(laps=False, telemetry=False, weather=False, messages=False)
+                
+                if not session.results.empty:
+                    for _, row in session.results.iterrows():
+                        driver = row['Abbreviation']
+                        team = row['TeamName']
+                        points = row['Points']
+                        
+                        driver_points[driver] = driver_points.get(driver, 0) + points
+                        constructor_points[team] = constructor_points.get(team, 0) + points
+                        
+                        # Store driver-team mapping (most recent team)
+                        if driver not in driver_teams or points > 0: # Update mapping preferrably when scoring or just last race
+                           driver_teams[driver] = team
+                        
+            except Exception as e:
+                print(f"Error processing round {race['RoundNumber']}: {e}")
+                continue
+                
+        # Convert to DataFrame
+        # Drivers
+        d_data = []
+        for dr, pts in driver_points.items():
+            d_data.append({
+                'Driver': dr,
+                'Points': pts,
+                'Team': driver_teams.get(dr, 'Unknown')
+            })
+            
+        d_df = pd.DataFrame(d_data)
+        if not d_df.empty:
+            d_df = d_df.sort_values('Points', ascending=False).reset_index(drop=True)
+            d_df.index += 1
+        
+        # Constructors
+        c_df = pd.DataFrame(list(constructor_points.items()), columns=['Team', 'Points'])
+        if not c_df.empty:
+            c_df = c_df.sort_values('Points', ascending=False).reset_index(drop=True)
+            c_df.index += 1
+        
+        return d_df, c_df
+                
+    except Exception as e:
+        print(f"Error getting standings: {e}")
+        
+    return pd.DataFrame(), pd.DataFrame()
+
+def get_latest_completed_session():
+    """
+    Find the absolute latest completed session (FP1, FP2, FP3, Q, Sprint, Race).
+    Returns dict with session details.
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        year = now.year
+        
+        # Get schedule for current year
+        try:
+            schedule = fastf1.get_event_schedule(year)
+        except Exception:
+            # Fallback for year boundary issues
+            schedule = fastf1.get_event_schedule(year - 1)
+            year = year - 1
+        
+        latest_session = None
+        latest_time = None
+        
+        for _, event in schedule.iterrows():
+            # Check all 5 possible sessions
+            for i in range(1, 6):
+                s_date_col = f'Session{i}Date'
+                s_name_col = f'Session{i}'
+                
+                if s_date_col in event and pd.notna(event[s_date_col]):
+                    # Get session time
+                    s_time = event[s_date_col]
+                    
+                    # Ensure timezone awareness (FastF1 usually returns naive / local)
+                    # We assume FastF1 returns local time but often it's UTC-ish or mixed.
+                    # Best practice: Assign UTC if naive, then compare.
+                    if s_time.tzinfo is None:
+                        s_time = s_time.replace(tzinfo=timezone.utc)
+                    
+                    # Buffer: Allow 2 hours after session start for "completion"
+                    # Session is "completed" roughly 2 hours after start (safe bet)
+                    completion_time = s_time + pd.Timedelta(hours=2.5)
+                        
+                    if completion_time < now:
+                        # It's a completed session
+                        if latest_time is None or s_time > latest_time:
+                            latest_time = s_time
+                            
+                            # Determine Session Type Code for FastF1
+                            # R=Race, Q=Quali, S=Sprint, FP1/2/3
+                            s_name = event[s_name_col]
+                            s_type = 'R'
+                            if 'Qualifying' in s_name: s_type = 'Q'
+                            elif 'Sprint' in s_name: s_type = 'S'
+                            elif 'Practice' in s_name: s_type = 'FP' + s_name[-1]
+                            
+                            latest_session = {
+                                'Year': year,
+                                'Round': int(event['RoundNumber']),
+                                'EventName': event['EventName'],
+                                'Session': s_name,
+                                'SessionType': s_type,
+                                'Date': s_time
+                            }
+                            
+        return latest_session
+        
+    except Exception as e:
+        print(f"Error finding latest session: {e}")
+        return None
+
+def get_session_status(year, round_num):
+    """
+    Get the status of all sessions for a specific round.
+    Returns a dict mapping session type to boolean (completed or not).
+    """
+    try:
+        schedule = fastf1.get_event_schedule(year)
+        event = schedule[schedule['RoundNumber'] == round_num]
+        
+        if event.empty:
+            return {}
+            
+        event = event.iloc[0]
+        now = datetime.now(timezone.utc)
+        status = {}
+        
+        for i in range(1, 6):
+            s_name = event[f'Session{i}']
+            s_date = event[f'Session{i}Date']
+            
+            if pd.isna(s_date): continue
+            
+            if s_date.tzinfo is None:
+                s_date = s_date.replace(tzinfo=timezone.utc)
+                
+            # Completed if now > start + 2 hours
+            is_complete = now > (s_date + pd.Timedelta(hours=2))
+            
+            # Map simplified names
+            key = 'Race'
+            if 'Qualifying' in s_name: key = 'Qualifying'
+            elif 'Sprint' in s_name: key = 'Sprint'
+            elif 'Practice' in s_name: key = 'Practice'
+            
+            # Store specific if needed, but mainly we care about Q and R
+            if key not in status or is_complete: # Upgrade to True if multiple (e.g. Q1/Q2/Q3 logic complex, simplified here)
+                status[s_name] = is_complete
+                
+        return status
+    except Exception as e:
+        print(f"Error getting session status: {e}")
+        return {}
+
+def get_session_results(year, round_num, session_type):
+    """
+    Fetch results for a specific session using FastF1.
+    """
+    try:
+        session = fastf1.get_session(year, round_num, session_type)
+        session.load(laps=False, telemetry=False, weather=False, messages=False)
+        
+        if not session.results.empty:
+            df = session.results[['Position', 'Abbreviation', 'TeamName', 'Time']].head(20)
+            # Format Time as string clean for display
+            df['Time'] = df['Time'].astype(str).str.replace('0 days ', '')
+            return df
+            
+    except Exception as e:
+        print(f"Error fetching session results: {e}")
+        
+    return pd.DataFrame()

@@ -6,7 +6,7 @@ import time
 import random
 from tqdm import tqdm
 from data.ingest_data_enhanced import ingest_enhanced_race_data
-from models.train_lap_model import train_model
+from models.train_model import train_model
 from utils.db import get_supabase_client
 from utils.logger import get_logger
 from utils.reports import generate_race_report
