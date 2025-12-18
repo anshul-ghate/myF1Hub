@@ -52,7 +52,7 @@ def check_and_update():
     
     if session_type == 'R':
         # Check if Race is already ingested
-        if race_data and race_data.get('ingestion_complete'):
+        if race_data and race_data.get('ingestion_status') == 'COMPLETE':
             logger.info(f"Race {year} R{round_num} already fully ingested.")
         else:
             logger.info(f"Race {year} R{round_num} COMPLETED but not fully ingested. Triggering Update.")
@@ -91,7 +91,7 @@ def check_and_update():
                 logger.info("Triggering Model Retraining...")
                 
                 # Get all race IDs for training
-                all_races = supabase.table('races').select('id').eq('ingestion_complete', True).execute()
+                all_races = supabase.table('races').select('id').eq('ingestion_status', 'COMPLETE').execute()
                 race_ids = [r['id'] for r in all_races.data]
                 train_model(race_ids)
                 

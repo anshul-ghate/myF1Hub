@@ -1,0 +1,91 @@
+# F1 PitWall AI - Pipeline Configuration
+# This file controls the automated data ingestion and training pipeline
+# Modify these settings to customize pipeline behavior
+
+# ============== SCHEDULING ==============
+schedule:
+  # Check for new data every N hours (local scheduler)
+  check_interval_hours: 6
+  
+  # Days to actively check (0=Mon, 6=Sun)
+  # F1 races typically: Friday (FP), Saturday (Quali/Sprint), Sunday (Race)
+  active_days: [4, 5, 6, 0]  # Fri, Sat, Sun, Mon
+  
+  # Hours to check (24h format, UTC)
+  active_hours: [14, 18, 22, 2]  # Common race end times in UTC
+
+# ============== INGESTION ==============
+ingestion:
+  # Start year for historical data
+  min_year: 2021
+  
+  # Current year for fresh data (auto-detected if null)
+  current_year: null
+  
+  # Session types to ingest
+  session_types:
+    - R    # Race
+    - Q    # Qualifying
+    - S    # Sprint (if available)
+  
+  # Retry settings for FastF1 API
+  max_retries: 3
+  retry_delay_seconds: 5
+  
+  # Batch size for bulk upserts
+  batch_size: 2000
+
+# ============== TRAINING ==============
+training:
+  # Auto-retrain after successful race ingestion
+  auto_retrain: true
+  
+  # Minimum races required for training
+  min_races_for_training: 10
+  
+  # Models to train
+  models:
+    - hybrid_predictor
+    - dynasty_engine
+  
+  # Skip training if last training was within N hours
+  cooldown_hours: 24
+
+# ============== FEATURE ENGINEERING ==============
+features:
+  # Lookback windows for driver form
+  form_lookback_races: 5
+  
+  # Circuit history lookback
+  circuit_lookback_years: 5
+  
+  # Team reliability lookback
+  reliability_lookback_races: 20
+
+# ============== LOGGING & MONITORING ==============
+monitoring:
+  # Log level (DEBUG, INFO, WARNING, ERROR)
+  log_level: INFO
+  
+  # Log to database
+  log_to_supabase: true
+  
+  # Only log warnings and above to DB (reduces noise)
+  supabase_log_level: WARNING
+  
+  # Enable MLflow tracking
+  mlflow_enabled: true
+  
+  # MLflow tracking URI
+  mlflow_uri: "file:./mlruns"
+
+# ============== NOTIFICATIONS ==============
+notifications:
+  # Enable Slack/Discord notifications (future)
+  enabled: false
+  
+  # Notify on events
+  notify_on:
+    - ingestion_complete
+    - training_complete
+    - pipeline_error

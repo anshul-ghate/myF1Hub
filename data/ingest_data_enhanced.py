@@ -1,25 +1,45 @@
+import sys
+import os
+
+# Add project root to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import fastf1
 import pandas as pd
 import numpy as np
+from typing import Optional, Dict, Any, List
+
 from utils.db import get_supabase_client
-from utils.logger import get_logger
-import os
+from utils.logger import get_logger, log_operation
+from utils.exceptions import (
+    IngestionError, 
+    DatabaseError, 
+    DataValidationError,
+    RateLimitError
+)
+from utils.schemas import (
+    DriverCreate, 
+    RaceCreate, 
+    LapCreate, 
+    RaceResultCreate,
+    LapData,
+    TelemetryStats,
+    validate_race_results
+)
+from utils.api_config import configure_fastf1_retries
 
 # Enable cache
 if not os.path.exists('cache'):
     os.makedirs('cache')
 fastf1.Cache.enable_cache('cache')
 
+# Configure Retries
+configure_fastf1_retries()
+
 supabase = get_supabase_client()
 logger = get_logger("DataIngestionEnhanced")
 
-# Configure Retries for FastF1/Requests
-from utils.api_config import configure_fastf1_retries
-configure_fastf1_retries()
-
-
 # Global In-Memory Cache to reduce DB reads
-# Structure: { 'table_name': { 'column_value': 'uuid' } }
 ID_CACHE = {
     'drivers': {},
     'circuits': {},
@@ -27,7 +47,11 @@ ID_CACHE = {
     'seasons': {}
 }
 
-def resolve_id(table, column, value, data_if_missing=None):
+def resolve_id(table: str, column: str, value: Any, data_if_missing: Optional[Dict] = None) -> Optional[str]:
+    """
+    Resolve a database ID for a given entity, inserting it if missing.
+    Uses in-memory cache to minimize DB lookups.
+    """
     # 1. Check Cache
     if table in ID_CACHE and value in ID_CACHE[table]:
         return ID_CACHE[table][value]
@@ -43,394 +67,432 @@ def resolve_id(table, column, value, data_if_missing=None):
         # 3. If not found, try to insert
         if data_if_missing:
             try:
-                logger.info(f"Inserting new {table}: {value}")
+                logger.info(f"Inserting new {table}: {value}", extra={"table": table, "value": value})
                 res = supabase.table(table).insert(data_if_missing).execute()
                 if res.data:
                     uid = res.data[0]['id']
                     if table in ID_CACHE: ID_CACHE[table][value] = uid
                     return uid
-            except Exception:
+            except Exception as e:
                 # 4. If insert fails (likely race condition), try to find again
+                logger.warning(f"Insert failed for {table} {value}, retrying fetch: {e}")
                 res = supabase.table(table).select("id").eq(column, value).execute()
                 if res.data:
                     uid = res.data[0]['id']
                     if table in ID_CACHE: ID_CACHE[table][value] = uid
                     return uid
         return None
+        
     except Exception as e:
-        logger.error(f"Error resolving ID for {table} {value}: {e}")
-        return None
+        logger.error(f"Error resolving ID for {table} {value}", exc_info=True)
+        raise DatabaseError(f"Failed to resolve ID for {table}: {value}", details={"error": str(e)})
 
-def ingest_enhanced_race_data(year, race_round):
+def ingest_enhanced_race_data(year: int, race_round: int):
+    """
+    Ingest full race data including laps, telemetry, and results.
+    Validates data against schemas before insertion.
+    """
     logger.info(f"Starting ENHANCED ingestion for {year} Round {race_round}")
     
-    try:
-        session = fastf1.get_session(year, race_round, 'R')
-        session.load()
-    except Exception as e:
-        logger.error(f"Failed to load FastF1 session: {e}")
-        return
+    with log_operation(logger, "ingest_race", year=year, round=race_round):
+        # 1. Load FastF1 Session
+        try:
+            session = fastf1.get_session(year, race_round, 'R')
+            session.load()
+        except Exception as e:
+            raise IngestionError(
+                f"Failed to load FastF1 session for {year} Round {race_round}", 
+                source="FastF1",
+                details={"error": str(e)}
+            )
 
-    # --- Basic Info Setup ---
-    # 1. Season
+        # 2. Setup Basic Info (Season, Circuit, Race)
+        _ingest_basic_info(session, year, race_round)
+        
+        # Get Race ID
+        circuit_ref = session.event.EventName.replace(" ", "_").lower()
+        race_ref = f"{year}_{race_round}_{circuit_ref}"
+        
+        # We need to reconstruct the race_data for resolve_id just in case, or just fetch ID
+        # Assuming _ingest_basic_info handled creation, we just fetch ID
+        try:
+            res = supabase.table('races').select('id').eq('ergast_race_id', race_ref).execute()
+            if not res.data:
+                 raise IngestionError(f"Race {race_ref} not found after basic ingestion")
+            race_id = res.data[0]['id']
+        except Exception as e:
+            raise DatabaseError(f"Failed to retrieve race ID for {race_ref}", details={"error": str(e)})
+
+        # 3. Process Drivers and Map IDs
+        driver_map = _ingest_drivers(session)
+        
+        # 4. Process Laps (Vectorized)
+        _process_laps(session, race_id, driver_map)
+        
+        # 5. Process Telemetry
+        _process_telemetry(session, race_id, driver_map)
+        
+        # 6. Process Pit Stops
+        _process_pit_stops(session, race_id, driver_map)
+        
+        # 7. Process Results
+        _process_results(session, race_id, driver_map)
+        
+        # 8. Mark Complete
+        try:
+            supabase.table('races').update({'ingestion_status': 'COMPLETE', 'updated_at': 'now()'}).eq('id', race_id).execute()
+            logger.info(f"Enhanced Ingestion complete for {year} Round {race_round}")
+        except Exception as e:
+            logger.error("Failed to mark ingestion complete", exc_info=True)
+
+
+def _ingest_basic_info(session, year, race_round):
+    """Ingest Season, Circuit, and Race metadata."""
     try:
+        # Season
         if year not in ID_CACHE['seasons']:
             res = supabase.table('seasons').select('year').eq('year', year).execute()
             if not res.data:
                 supabase.table('seasons').insert({'year': year}).execute()
-            ID_CACHE['seasons'][year] = True # Just mark as present
-    except Exception:
-        pass
+            ID_CACHE['seasons'][year] = True
 
-    # 2. Circuit
-    circuit_ref = session.event.EventName.replace(" ", "_").lower()
-    circuit_data = {
-        'ergast_circuit_id': circuit_ref,
-        'name': session.event.EventName,
-        'location': session.event.Location,
-        'country': session.event.Country,
-        'lat': 0, 'lng': 0
-    }
-    circuit_id = resolve_id('circuits', 'ergast_circuit_id', circuit_ref, circuit_data)
+        # Circuit
+        circuit_ref = session.event.EventName.replace(" ", "_").lower()
+        circuit_data = {
+            'ergast_circuit_id': circuit_ref,
+            'name': session.event.EventName,
+            'location': session.event.Location,
+            'country': session.event.Country,
+            'lat': 0, 'lng': 0
+        }
+        circuit_id = resolve_id('circuits', 'ergast_circuit_id', circuit_ref, circuit_data)
 
-    # 3. Race
-    race_ref = f"{year}_{race_round}_{circuit_ref}"
-    race_data = {
-        'ergast_race_id': race_ref,
-        'season_year': year,
-        'round': race_round,
-        'name': session.event.EventName,
-        'circuit_id': circuit_id,
-        'date': session.date.strftime('%Y-%m-%d'),
-        'time': session.date.strftime('%H:%M:%S')
-    }
-    race_id = resolve_id('races', 'ergast_race_id', race_ref, race_data)
-    
-    if not race_id:
-        logger.error("Could not resolve Race ID. Aborting.")
-        return
+        # Race
+        race_ref = f"{year}_{race_round}_{circuit_ref}"
+        race_db_data = {
+            'season_year': year,
+            'round': race_round,
+            'name': session.event.EventName,
+            'race_date': session.date.strftime('%Y-%m-%d'),
+            'race_time': session.date.strftime('%H:%M:%S'),
+            'circuit_id': circuit_id,
+            'ergast_race_id': race_ref,
+            'ingestion_status': 'PENDING'
+        }
+        
+        resolve_id('races', 'ergast_race_id', race_ref, race_db_data)
+        
+    except Exception as e:
+        raise IngestionError("Failed to ingest basic race info", details={"error": str(e)})
 
-    # 4. Drivers
+
+def _ingest_drivers(session) -> Dict[str, str]:
+    """Ingest drivers and return map of Abbreviation -> UUID."""
     driver_map = {} 
     for drv in session.drivers:
-        drv_info = session.get_driver(drv)
-        if drv_info is None or pd.isna(drv_info['Abbreviation']):
+        try:
+            drv_info = session.get_driver(drv)
+            if drv_info is None or pd.isna(drv_info['Abbreviation']):
+                continue
+                
+            d_ref = drv_info['Abbreviation'].lower()
+            
+            # Validate with Schema
+            driver_data = DriverCreate(
+                code=drv_info['Abbreviation'],
+                given_name=drv_info['FirstName'],
+                family_name=drv_info['LastName'],
+                nationality=drv_info['CountryCode'],
+                ergast_driver_id=d_ref
+            )
+            
+            d_id = resolve_id('drivers', 'ergast_driver_id', d_ref, driver_data.model_dump())
+            if d_id:
+                driver_map[drv_info['Abbreviation']] = d_id
+                
+        except Exception as e:
+            logger.warning(f"Failed to process driver {drv}: {e}")
             continue
-        d_ref = drv_info['Abbreviation'].lower()
-        d_data = {
-            'ergast_driver_id': d_ref,
-            'code': drv_info['Abbreviation'],
-            'given_name': drv_info['FirstName'],
-            'family_name': drv_info['LastName'],
-            'nationality': drv_info['CountryCode']
-        }
-        d_id = resolve_id('drivers', 'ergast_driver_id', d_ref, d_data)
-        driver_map[drv_info['Abbreviation']] = d_id
+            
+    return driver_map
 
-    # --- ENHANCED DATA PROCESSING ---
 
-    # --- ENHANCED DATA PROCESSING (VECTORIZED) ---
-
-    # 5. Laps with Fuel & Gap
+def _process_laps(session, race_id, driver_map):
+    """Process and upsert laps."""
     logger.info("Processing Laps (Vectorized)...")
     laps = session.laps
     
-    # Ensure numeric
+    if laps.empty:
+        logger.warning("No laps data in session")
+        return
+        
     laps['LapNumber'] = pd.to_numeric(laps['LapNumber'])
     total_laps_in_race = laps['LapNumber'].max()
     
-    # A. Calculate Gaps (Vectorized)
-    # Get leader time per lap
+    # Vectorized Gap & Fuel
     leader_times = laps[laps['Position'] == 1][['LapNumber', 'Time']].set_index('LapNumber')['Time']
-    # Map leader time to all laps
     laps['LeaderTime'] = laps['LapNumber'].map(leader_times)
-    # Calculate gap
     laps['GapToLeader'] = (laps['Time'] - laps['LeaderTime']).dt.total_seconds().fillna(0)
     
-    # B. Calculate Fuel (Vectorized)
-    # Linear burn: 110kg -> 0kg
     if total_laps_in_race > 0:
         laps['FuelLoad'] = 110.0 * (1.0 - (laps['LapNumber'] / total_laps_in_race))
     else:
         laps['FuelLoad'] = 0.0
 
-    # Prepare Laps Batch
     laps_to_upload = []
+    errors_count = 0
+
+    # Get unique drivers from lap data
+    unique_drivers = laps['Driver'].unique()
+    logger.info(f"Found {len(unique_drivers)} drivers with lap data")
+
+    for d_abbrev in unique_drivers:
+        d_id = driver_map.get(d_abbrev)
+        if not d_id:
+            logger.debug(f"Driver {d_abbrev} not in driver_map, skipping")
+            continue
+
+        d_laps = laps[laps['Driver'] == d_abbrev].copy()
+        
+        for _, lap in d_laps.iterrows():
+            try:
+                def to_ms(td):
+                    """Convert timedelta to milliseconds."""
+                    if pd.notnull(td):
+                        return int(td.total_seconds() * 1000)
+                    return None
+
+                # Create lap dict with milliseconds for times
+                lap_dict = {
+                    'race_id': race_id,
+                    'driver_id': d_id,
+                    'lap_number': int(lap['LapNumber']),
+                    'lap_time_ms': to_ms(lap['LapTime']),
+                    'sector_1_ms': to_ms(lap['Sector1Time']),
+                    'sector_2_ms': to_ms(lap['Sector2Time']),
+                    'sector_3_ms': to_ms(lap['Sector3Time']),
+                    'compound': str(lap['Compound']) if pd.notnull(lap['Compound']) else None,
+                    'tyre_life': int(lap['TyreLife']) if pd.notnull(lap['TyreLife']) else None,
+                    'fresh_tyre': bool(lap['FreshTyre']) if pd.notnull(lap['FreshTyre']) else None,
+                    'track_status': str(lap['TrackStatus']) if pd.notnull(lap['TrackStatus']) else None,
+                    'is_accurate': bool(lap['IsAccurate']) if pd.notnull(lap['IsAccurate']) else None,
+                    'position': int(lap['Position']) if pd.notnull(lap['Position']) else None,
+                    'gap_to_leader_ms': int(lap['GapToLeader'] * 1000) if pd.notnull(lap['GapToLeader']) else None,
+                    'fuel_load': float(lap['FuelLoad']) if pd.notnull(lap['FuelLoad']) else None
+                }
+                
+                laps_to_upload.append(lap_dict)
+
+            except Exception as e:
+                errors_count += 1
+                if errors_count <= 5:  # Only log first 5 errors
+                    logger.warning(f"Error processing lap {lap.get('LapNumber', '?')} for {d_abbrev}: {e}")
+
+    logger.info(f"Collected {len(laps_to_upload)} laps (errors: {errors_count})")
     
-    # We need to map Driver Abbreviation to ID efficiently
-    # driver_map is { 'HAM': 'uuid', ... }
-    
-    # Iterate by Driver to handle Telemetry efficiently too
+    if laps_to_upload:
+        _bulk_upsert('laps', laps_to_upload, 'race_id,driver_id,lap_number')
+
+
+def _process_telemetry(session, race_id, driver_map):
+    """Process and upsert telemetry stats."""
+    logger.info("Processing Telemetry...")
     telemetry_to_upload = []
     
     for drv in session.drivers:
         if drv not in session.results['Abbreviation'].values: continue
-        d_abbrev = session.get_driver(drv)['Abbreviation']
-        d_id = driver_map.get(d_abbrev)
+        d_id = driver_map.get(session.get_driver(drv)['Abbreviation'])
         if not d_id: continue
 
-        # Get laps for this driver
-        d_laps = laps[laps['Driver'] == d_abbrev].copy()
-        if d_laps.empty: continue
-
-        # --- Process Laps ---
-        for _, lap in d_laps.iterrows():
-            # Helper for intervals
-            def get_interval(td):
-                return str(td) if pd.notnull(td) else None
-
-            laps_to_upload.append({
-                'race_id': race_id,
-                'driver_id': d_id,
-                'lap_number': int(lap['LapNumber']),
-                'lap_time': get_interval(lap['LapTime']),
-                'sector_1_time': get_interval(lap['Sector1Time']),
-                'sector_2_time': get_interval(lap['Sector2Time']),
-                'sector_3_time': get_interval(lap['Sector3Time']),
-                'compound': lap['Compound'],
-                'tyre_life': int(lap['TyreLife']) if pd.notnull(lap['TyreLife']) else None,
-                'fresh_tyre': bool(lap['FreshTyre']) if pd.notnull(lap['FreshTyre']) else None,
-                'track_status': lap['TrackStatus'],
-                'is_accurate': bool(lap['IsAccurate']) if pd.notnull(lap['IsAccurate']) else None,
-                'position': int(lap['Position']) if pd.notnull(lap['Position']) else None,
-                'gap_to_leader': float(lap['GapToLeader']),
-                'fuel_load': float(lap['FuelLoad'])
-            })
-
-        # --- Process Telemetry (Batch by Driver) ---
-        # Instead of get_telemetry() per lap, we get car data for the whole session
-        # and slice it by lap times.
         try:
-            # Load car data for driver
-            car_data = session.car_data[drv] # This is a DataFrame
+            d_laps = session.laps.pick_driver(drv).pick_accurate()
+            car_data = session.car_data[drv]
             if car_data is None or car_data.empty: continue
-            
-            # We need to assign a LapNumber to each telemetry sample
-            # We define bins based on Lap Start Times
-            # Lap N starts at Lap N-1 End Time (or Session Start)
-            
-            # Create bins
-            # We use 'Time' (SessionTime)
-            # We need a list of (LapNumber, StartTime, EndTime)
-            # d_laps has 'LapStartTime' and 'Time' (which is LapEndTime)
-            # Note: FastF1 v3.1+ has 'LapStartTime'
-            
-            # Filter for accurate laps only for telemetry stats
-            accurate_laps = d_laps[d_laps['IsAccurate'] == True]
-            
-            for _, lap in accurate_laps.iterrows():
-                # Slice telemetry for this lap
-                # This is still a loop, but it's a loop over ~50 laps doing simple slicing
-                # faster than get_telemetry() which does internal overhead
+
+            for _, lap in d_laps.iterrows():
                 t_start = lap['LapStartTime']
-                t_end = lap['Time'] # Lap End Time
-                
+                t_end = lap['Time']
                 if pd.isnull(t_start) or pd.isnull(t_end): continue
-                
-                # Slice
+
                 mask = (car_data['Time'] >= t_start) & (car_data['Time'] <= t_end)
                 lap_tel = car_data.loc[mask]
                 
                 if lap_tel.empty: continue
                 
-                # Aggregate
-                t_stats = {
-                    'race_id': race_id,
-                    'driver_id': d_id,
-                    'lap_number': int(lap['LapNumber']),
-                    'speed_max': float(lap_tel['Speed'].max()) if 'Speed' in lap_tel else 0,
-                    'speed_avg': float(lap_tel['Speed'].mean()) if 'Speed' in lap_tel else 0,
-                    'throttle_avg': float(lap_tel['Throttle'].mean()) if 'Throttle' in lap_tel else 0,
-                    'brake_avg': float(lap_tel['Brake'].mean()) if 'Brake' in lap_tel else 0,
-                    'gear_shifts': int(lap_tel['nGear'].diff().abs().sum() / 2) if 'nGear' in lap_tel else 0
-                }
-                telemetry_to_upload.append(t_stats)
+                stats = TelemetryStats(
+                    race_id=race_id,
+                    driver_id=d_id,
+                    lap_number=int(lap['LapNumber']),
+                    speed_max=float(lap_tel['Speed'].max()),
+                    speed_avg=float(lap_tel['Speed'].mean()),
+                    throttle_avg=float(lap_tel['Throttle'].mean()),
+                    brake_avg=float(lap_tel['Brake'].mean()),
+                    gear_shifts=int(lap_tel['nGear'].diff().abs().sum() / 2)
+                )
+                telemetry_to_upload.append(stats.model_dump())
                 
         except Exception as e:
-            # logger.warning(f"Telemetry error for {d_abbrev}: {e}")
-            pass
+            logger.debug(f"Telemetry skipped for {drv}: {e}")
 
-    # Bulk Upsert
-    # Laps
-    if laps_to_upload:
-        # Chunking to avoid payload limits (Supabase has 1MB limit sometimes, or row limits)
-        chunk_size = 2000
-        for i in range(0, len(laps_to_upload), chunk_size):
-            chunk = laps_to_upload[i:i+chunk_size]
-            try:
-                supabase.table('laps').upsert(chunk, on_conflict='race_id, driver_id, lap_number').execute()
-            except Exception as e:
-                logger.error(f"Error upserting laps chunk: {e}")
-
-    # Telemetry
     if telemetry_to_upload:
-        chunk_size = 2000
-        for i in range(0, len(telemetry_to_upload), chunk_size):
-            chunk = telemetry_to_upload[i:i+chunk_size]
-            try:
-                supabase.table('telemetry_stats').upsert(chunk, on_conflict='race_id, driver_id, lap_number').execute()
-            except Exception as e:
-                logger.error(f"Error upserting telemetry chunk: {e}")
+        _bulk_upsert('telemetry_stats', telemetry_to_upload, 'race_id, driver_id, lap_number')
 
-    # 6. Pit Stops
-    logger.info("Processing Pit Stops...")
-    pit_stops_batch = []
-    pit_laps = session.laps.dropna(subset=['PitInTime', 'PitOutTime'], how='all') 
+
+def _process_results(session, race_id, driver_map):
+    """Process and upsert race results with validation."""
+    logger.info("Processing Results...")
+    results_batch = []
     
-    for i, lap in pit_laps.iterrows():
-        d_abbrev = lap['Driver']
+    # Iterate directly over session.results DataFrame
+    for _, row in session.results.iterrows():
+        d_abbrev = row.get('Abbreviation')
+        if pd.isna(d_abbrev):
+            continue
+        
         d_id = driver_map.get(d_abbrev)
+        if not d_id:
+            logger.debug(f"Driver {d_abbrev} not in driver_map")
+            continue
+        
+        try:
+            result = RaceResultCreate(
+                race_id=race_id,
+                driver_id=d_id,
+                position=int(row['Position']) if pd.notnull(row.get('Position')) else None,
+                grid=int(row['GridPosition']) if pd.notnull(row.get('GridPosition')) else None,
+                points=float(row['Points']) if pd.notnull(row.get('Points')) else 0.0,
+                status=str(row['Status']) if pd.notnull(row.get('Status')) else 'Finished',
+                laps_completed=int(row['LapsCompleted']) if pd.notnull(row.get('LapsCompleted')) else None
+            )
+            results_batch.append(result.model_dump(exclude_unset=True))
+        except Exception as e:
+            logger.warning(f"Invalid result for {d_abbrev}: {e}")
+
+    logger.info(f"Collected {len(results_batch)} race results")
+    
+    if results_batch:
+        _bulk_upsert('race_results', results_batch, 'race_id,driver_id')
+
+
+def _process_pit_stops(session, race_id, driver_map):
+    """Process pit stops."""
+    logger.info("Processing Pit Stops...")
+    stops = []
+    pit_laps = session.laps.dropna(subset=['PitInTime', 'PitOutTime'], how='all')
+    
+    for _, lap in pit_laps.iterrows():
+        d_id = driver_map.get(lap['Driver'])
         if not d_id: continue
         
-        # Calculate duration manually if PitDuration is missing
-        if 'PitDuration' in lap:
-            duration = lap['PitDuration']
-        else:
-            if pd.notnull(lap['PitOutTime']) and pd.notnull(lap['PitInTime']):
-                duration = lap['PitOutTime'] - lap['PitInTime']
-            else:
-                duration = None
-                
+        duration = lap.get('PitDuration')
+        if pd.isnull(duration) and pd.notnull(lap['PitOutTime']) and pd.notnull(lap['PitInTime']):
+            duration = lap['PitOutTime'] - lap['PitInTime']
+
         if pd.notnull(duration):
-            if isinstance(duration, pd.Timedelta):
-                duration_s = duration.total_seconds()
-            else:
-                duration_s = duration
-                
-            pit_stops_batch.append({
+            duration_ms = int(duration.total_seconds() * 1000) if hasattr(duration, 'total_seconds') else int(duration * 1000)
+            stops.append({
                 'race_id': race_id,
                 'driver_id': d_id,
                 'lap_number': int(lap['LapNumber']),
-                'duration': duration_s,
-                'local_timestamp': None
+                'duration_ms': duration_ms
             })
             
-    if pit_stops_batch:
-        supabase.table('pit_stops').insert(pit_stops_batch).execute()
-
-    # 8. Results (Positions, Grid, Points)
-    logger.info("Processing Results...")
-    print(f"   Processing results for {len(session.drivers)} drivers...")
-    results_batch = []
-    for drv in session.drivers:
-        if drv not in session.results['Abbreviation'].values: 
-            print(f"   Skipping {drv} (not in results)")
-            continue
-            
-        d_info = session.get_driver(drv)
-        d_id = driver_map.get(d_info['Abbreviation'])
-        if not d_id: 
-            print(f"   Skipping {drv} (no ID)")
-            continue
-        
-        # Safe extraction of fields
-        position = d_info.get('Position')
-        grid = d_info.get('GridPosition')
-        points = d_info.get('Points')
-        status = d_info.get('Status')
-        
-        # Handle NaN/None
-        position = int(position) if pd.notnull(position) else None
-        grid = int(grid) if pd.notnull(grid) else None
-        points = float(points) if pd.notnull(points) else 0.0
-        status = str(status) if pd.notnull(status) else 'Finished'
-        
-        results_batch.append({
-            'race_id': race_id,
-            'driver_id': d_id,
-            'position': position,
-            'grid': grid,
-            'points': points,
-            'status': status,
-            # 'team': d_info.get('TeamName', 'Unknown'), # Column missing in DB
-            'laps': int(d_info['ClassifiedPosition']) if str(d_info['ClassifiedPosition']).isdigit() else None
-        })
-        
-    if results_batch:
+    if stops:
         try:
-            print(f"   Upserting {len(results_batch)} results...")
-            data = supabase.table('race_results').upsert(results_batch, on_conflict='race_id, driver_id').execute()
-            print(f"   ✅ Upsert success! Data: {len(data.data) if data.data else 'No data returned'}")
+            supabase.table('pit_stops').insert(stops).execute()
         except Exception as e:
-            logger.error(f"Error upserting results: {e}")
-            print(f"   ❌ Error upserting results: {e}")
-    else:
-        print("   ⚠️ No results to upsert.")
+            logger.error(f"Error inserting pit stops: {e}")
 
-    # 7. Mark Ingestion as Complete
-    supabase.table('races').update({'ingestion_complete': True}).eq('id', race_id).execute()
-    logger.info(f"Enhanced Ingestion complete for {year} Round {race_round}")
 
-def ingest_qualifying_results(year, race_round):
-    """
-    Ingest ONLY qualifying results to populate the grid for upcoming races.
-    """
+def _bulk_upsert(table, data, conflict_columns):
+    """Helper for chunked upserts. Uses insert with ignore_duplicates for reliability."""
+    chunk_size = 500  # Reduced chunk size for more reliable inserts
+    total = len(data)
+    inserted = 0
+    
+    logger.info(f"Bulk inserting {total} rows into {table}...")
+    
+    for i in range(0, total, chunk_size):
+        chunk = data[i:i+chunk_size]
+        try:
+            # Use upsert with ignore_duplicates=False to update on conflict
+            # The on_conflict param should match the UNIQUE constraint columns
+            result = supabase.table(table).upsert(
+                chunk, 
+                on_conflict=conflict_columns,
+                ignore_duplicates=False
+            ).execute()
+            inserted += len(result.data) if result.data else 0
+        except Exception as e:
+            # On upsert failure, fallback to individual inserts with ignore
+            logger.warning(f"Bulk upsert failed for {table}, trying individual inserts: {e}")
+            for row in chunk:
+                try:
+                    supabase.table(table).upsert(row, on_conflict=conflict_columns).execute()
+                    inserted += 1
+                except Exception as row_e:
+                    logger.debug(f"Row insert failed: {row_e}")
+    
+    logger.info(f"Inserted {inserted}/{total} rows into {table}")
+
+
+def ingest_qualifying_results(year: int, race_round: int):
+    """Ingest qualifying results to populate the grid."""
     logger.info(f"Starting QUALIFYING ingestion for {year} Round {race_round}")
     
     try:
         session = fastf1.get_session(year, race_round, 'Q')
         session.load()
     except Exception as e:
-        logger.error(f"Failed to load FastF1 Qualifying session: {e}")
+        logger.error(f"Failed to load qualifying: {e}")
         return
 
-    # Resolve Race ID (Must exist)
+    # Find Race ID
     circuit_ref = session.event.EventName.replace(" ", "_").lower()
     race_ref = f"{year}_{race_round}_{circuit_ref}"
+    race_id = resolving_race_id_helper(race_ref, year, race_round)
     
-    # Try to find race_id
-    res = supabase.table('races').select('id').eq('ergast_race_id', race_ref).execute()
-    if not res.data:
-        # Try by name/year/round if ergast_id missing
-        res = supabase.table('races').select('id').eq('season_year', year).eq('round', race_round).execute()
-        
-    if not res.data:
-        logger.error("Race not found in DB. Run schedule population first.")
+    if not race_id:
+        logger.error("Race not found for qualifying ingestion.")
         return
-        
-    race_id = res.data[0]['id']
-    
-    # Process Qualifying Results
+
+    # Process
+    driver_map = _ingest_drivers(session)
     results_batch = []
-    
-    # Ensure drivers exist
+
     for drv in session.drivers:
         if drv not in session.results['Abbreviation'].values: continue
-        d_info = session.get_driver(drv)
-        
-        # Resolve Driver ID
-        d_ref = d_info['Abbreviation'].lower()
-        d_data = {
-            'ergast_driver_id': d_ref,
-            'code': d_info['Abbreviation'],
-            'given_name': d_info['FirstName'],
-            'family_name': d_info['LastName'],
-            'nationality': d_info['CountryCode']
-        }
-        d_id = resolve_id('drivers', 'ergast_driver_id', d_ref, d_data)
-        
+        d_id = driver_map.get(session.get_driver(drv)['Abbreviation'])
         if not d_id: continue
         
-        # Extract Position (which is Grid for the race)
-        position = d_info.get('Position')
-        
-        if pd.notnull(position):
+        d_info = session.get_driver(drv)
+        if pd.notnull(d_info.get('Position')):
             results_batch.append({
                 'race_id': race_id,
                 'driver_id': d_id,
-                'grid': int(position),
-                'status': 'Qualified' # Marker
+                'grid': int(d_info['Position']),
+                'status': 'Qualified'
             })
             
     if results_batch:
-        try:
-            # Upsert - Update grid if exists, insert if not
-            # Note: This might overwrite race results if run AFTER race, so use carefully.
-            # But for upcoming race, it's fine.
-            supabase.table('race_results').upsert(results_batch, on_conflict='race_id, driver_id').execute()
-            logger.info(f"✅ Qualifying results ingested for {len(results_batch)} drivers.")
-        except Exception as e:
-            logger.error(f"Error upserting qualifying results: {e}")
+        _bulk_upsert('race_results', results_batch, 'race_id, driver_id')
+        logger.info(f"Ingested {len(results_batch)} qualifying results")
+
+
+def resolving_race_id_helper(race_ref, year, round_num):
+    try:
+        res = supabase.table('races').select('id').eq('ergast_race_id', race_ref).execute()
+        if res.data: return res.data[0]['id']
+        
+        res = supabase.table('races').select('id').eq('season_year', year).eq('round', round_num).execute()
+        if res.data: return res.data[0]['id']
+    except:
+        pass
+    return None
 
 if __name__ == "__main__":
-    ingest_enhanced_race_data(2024, 1)
+    # Test run
+    try:
+        ingest_enhanced_race_data(2024, 1)
+    except Exception as e:
+        logger.error(f"Ingestion script failed: {e}")

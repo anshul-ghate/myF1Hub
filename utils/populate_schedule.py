@@ -38,8 +38,8 @@ def populate_schedule(year=2025):
                 'name': event_name,
                 'ergast_race_id': f"{year}_{round_num}_{event_name.replace(' ', '_').lower()}",
                 'circuit_id': fallback_circuit_id, # Required FK
-                'date': event_date.strftime('%Y-%m-%d'),
-                'ingestion_complete': False
+                'race_date': event_date.strftime('%Y-%m-%d'),
+                'ingestion_status': 'PENDING'
             }
             try:
                 supabase.table('races').insert(data).execute()

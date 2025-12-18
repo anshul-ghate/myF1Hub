@@ -14,6 +14,9 @@ import fastf1
 from datetime import datetime, timezone, timedelta
 import os
 import pytz
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # Page Config - must be first
 st.set_page_config(
@@ -28,8 +31,8 @@ def local_css(file_name):
     try:
         with open(file_name) as f:
             st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to load CSS {file_name}: {e}")
 
 local_css("app/assets/custom.css")
 
@@ -83,7 +86,7 @@ def get_live_session():
                 latest = sessions[-1]
                 return latest
     except Exception as e:
-        print(f"OpenF1 session check failed: {e}")
+        logger.warning(f"OpenF1 session check failed: {e}")
     return None
 
 
@@ -99,7 +102,7 @@ def get_live_positions():
         if response.status_code == 200:
             return response.json()
     except Exception as e:
-        print(f"OpenF1 positions failed: {e}")
+        logger.debug(f"OpenF1 positions failed: {e}")
     return []
 
 
@@ -115,7 +118,7 @@ def get_live_car_data():
         if response.status_code == 200:
             return response.json()
     except Exception as e:
-        print(f"OpenF1 car data failed: {e}")
+        logger.debug(f"OpenF1 car data failed: {e}")
     return []
 
 
@@ -131,7 +134,7 @@ def get_live_drivers():
         if response.status_code == 200:
             return response.json()
     except Exception as e:
-        print(f"OpenF1 drivers failed: {e}")
+        logger.warning(f"OpenF1 drivers failed: {e}")
     return []
 
 
@@ -149,7 +152,7 @@ def get_live_weather():
             if data:
                 return data[-1]  # Most recent
     except Exception as e:
-        print(f"OpenF1 weather failed: {e}")
+        logger.warning(f"OpenF1 weather failed: {e}")
     return None
 
 
@@ -174,7 +177,7 @@ def check_upcoming_session():
                         }
         return None
     except Exception as e:
-        print(f"Schedule check failed: {e}")
+        logger.error(f"Schedule check failed: {e}")
         return None
 
 
@@ -260,7 +263,7 @@ if st.session_state.live_mode == 'live':
         try:
             r, g, b = int(color_str[0:2], 16), int(color_str[2:4], 16), int(color_str[4:6], 16)
             driver_colors[code] = (r, g, b)
-        except:
+        except Exception:
             driver_colors[code] = (128, 128, 128)
         driver_map[d.get("driver_number")] = code
     
@@ -427,7 +430,8 @@ else:
             try:
                 st.session_state.demo_data = get_race_telemetry_frames(demo_year, demo_round, 'R')
             except Exception as e:
-                st.error(f"Could not load demo data: {e}")
+                logger.error(f"Could not load demo data: {e}")
+                st.error(f"Could not load demo data. Please try again later.")
                 st.session_state.demo_data = {}
     
     demo_data = st.session_state.demo_data

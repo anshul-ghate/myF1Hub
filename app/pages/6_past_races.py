@@ -176,13 +176,22 @@ with col_session:
 
 with col_load:
     st.write("")  # Spacer
-    st.write("")  # Spacer
-    load_button = st.button("🔄 Load Race", type="primary", width='stretch', 
+    # Load mode selection
+    load_mode = st.radio(
+        "Mode",
+        ["⚡ Fast", "🎯 Full"],
+        horizontal=True,
+        help="Fast: Instant load, approximate positions. Full: Accurate telemetry, ~30s load time.",
+        label_visibility="collapsed"
+    )
+    full_mode = load_mode == "🎯 Full"
+    
+    load_button = st.button("🔄 Load Race", type="primary", 
                             disabled=(selected_round is None))
 
 # Check if we need to load new data
 if selected_round is not None:
-    current_key = f"{selected_year}_{selected_round}_{session_code}"
+    current_key = f"{selected_year}_{selected_round}_{session_code}_{load_mode}"
     
     if load_button or (st.session_state.past_race_key != current_key and st.session_state.past_race_data is None):
         if load_button:
@@ -191,11 +200,18 @@ if selected_round is not None:
             st.session_state.past_race_playing = False
             st.session_state.past_race_selected_driver = None
             
-            with st.spinner(f"Loading {selected_session} data for {selected_year} Round {selected_round}..."):
+            import time as time_module
+            start_time = time_module.time()
+            
+            mode_text = "with full telemetry" if full_mode else "in fast mode"
+            with st.spinner(f"Loading {selected_session} data {mode_text}..."):
                 try:
-                    data = get_race_telemetry_frames(selected_year, selected_round, session_code)
+                    data = get_race_telemetry_frames(selected_year, selected_round, session_code, full_mode=full_mode)
                     st.session_state.past_race_data = data
-                    st.success(f"Loaded {data['event_name']} - {data['total_laps']} laps, {len(data['frames'])} frames")
+                    
+                    elapsed = time_module.time() - start_time
+                    cache_msg = " (from cache)" if data.get('_from_cache') else ""
+                    st.success(f"✅ Loaded {data['event_name']} - {data['total_laps']} laps, {len(data['frames'])} frames in {elapsed:.1f}s{cache_msg}")
                 except Exception as e:
                     st.error(f"Failed to load race data: {e}")
                     st.session_state.past_race_data = None

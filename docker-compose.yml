@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  f1-pitwall-app:
+    build: .
+    container_name: f1-pitwall-app
+    ports:
+      - "8501:8501"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    depends_on:
+      - mlflow
+    volumes:
+      - ./data:/app/data
+      - ./models/saved:/app/models/saved
+      - ./f1_cache_dynasty:/app/f1_cache_dynasty
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.10.0
+    container_name: mlflow_server
+    ports:
+      - "5000:5000"
+    command: mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root ./mlruns --host 0.0.0.0
+    volumes:
+      - ./mlruns:/mlruns
+      - ./mlflow.db:/mlflow.db
+  # Optional: Redis for caching if we implement it later
+  # redis:
+  #   image: redis:alpine
+  #   ports:
+  #     - "6379:6379"

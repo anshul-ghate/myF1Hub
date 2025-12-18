@@ -87,17 +87,25 @@ def preprocess_features(laps_df, weather_df):
     df = df[df['is_accurate'] == True].copy() # Only accurate laps
     
     # Convert Interval strings to seconds
-    # Postgres interval format might be "00:01:35.123" or similar. 
-    # Pandas might read it as string.
-    def parse_interval(x):
+    # New schema uses milliseconds - convert to seconds
+    def ms_to_seconds(x):
         if x is None: return None
-        # Simple parser if it comes as string "HH:MM:SS.ssss"
+        if isinstance(x, (int, float)):
+            return x / 1000.0
+        # Fallback for legacy interval strings
         try:
             return pd.to_timedelta(x).total_seconds()
         except:
             return None
 
-    df['lap_time_s'] = df['lap_time'].apply(parse_interval)
+    # Handle both old interval format and new ms format
+    if 'lap_time_ms' in df.columns:
+        df['lap_time_s'] = df['lap_time_ms'].apply(ms_to_seconds)
+    elif 'lap_time' in df.columns:
+        df['lap_time_s'] = df['lap_time'].apply(ms_to_seconds)
+    else:
+        df['lap_time_s'] = None
+        
     df = df.dropna(subset=['lap_time_s'])
     
     # One-Hot Encode Compound
@@ -130,7 +138,10 @@ def preprocess_features(laps_df, weather_df):
     df = df.dropna(subset=['prev_lap_time'])
     
     # Select features and target
-    # Now including enhanced features: fuel_load, gap_to_leader, position, driver_*, team_*, prev_lap_time
+    # Handle both old column names (gap_to_leader) and new (gap_to_leader_ms)
+    if 'gap_to_leader_ms' in df.columns:
+        df['gap_to_leader'] = df['gap_to_leader_ms'] / 1000.0  # Convert ms to seconds
+        
     base_features = ['lap_number', 'tyre_life', 'fuel_load', 'gap_to_leader', 'position', 'prev_lap_time']
     
     # Ensure base features are numeric

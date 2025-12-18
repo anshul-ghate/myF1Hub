@@ -1,4 +1,8 @@
 import streamlit as st
+
+# Page Config - MUST be first Streamlit command
+st.set_page_config(page_title="Season Central", page_icon="🏁", layout="wide")
+
 import pandas as pd
 import fastf1
 import datetime
@@ -10,25 +14,30 @@ from utils.race_utils import (
     get_session_results,
     get_track_map_image
 )
-from models.dynasty_engine import DynastyEngine
 from app.components.sidebar import render_sidebar
 
 # Inject Custom CSS
 def local_css(file_name):
-    with open(file_name) as f:
-        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+    try:
+        with open(file_name) as f:
+            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+    except:
+        pass
 
 local_css("app/assets/custom.css")
 
 # Render Sidebar
 render_sidebar()
 
-st.set_page_config(page_title="Season Central", page_icon="🏁", layout="wide")
-
-# Initialize Engine
+# Initialize Engine with error handling
 @st.cache_resource
 def load_engine():
-    return DynastyEngine()
+    try:
+        from models.dynasty_engine import DynastyEngine
+        return DynastyEngine()
+    except Exception as e:
+        st.warning(f"⚠️ Dynasty Engine unavailable: {e}")
+        return None
 
 engine = load_engine()
 
@@ -137,7 +146,91 @@ if not upcoming.empty:
         st.dataframe(pd.DataFrame(sessions_df), hide_index=True, width='stretch')
 
 else:
-    st.info("No upcoming events found for this season.")
+    # Fallback: Show most recent completed event (off-season)
+    completed = schedule[schedule['EventDate'] < now_utc]
+    
+    if not completed.empty:
+        next_event = completed.iloc[-1]  # Most recent completed
+        
+        st.info(f"📅 **Off-Season** - Showing most recent event from {current_year}")
+        
+        # Track map
+        track_img = get_track_map_image(next_event)
+        
+        col_map, col_info = st.columns([1, 1])
+        
+        with col_map:
+            if track_img:
+                st.markdown(f'''
+                <div style="width: 500px; height: 600px; border-radius: 12px; border: 1px solid #333; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #1a1a1a;">
+                    <img src="{track_img}" style="width: 100%; height: 100%; object-fit: contain;">
+                </div>
+                ''', unsafe_allow_html=True)
+            else:
+                st.info("Track map currently unavailable.")
+        
+        with col_info:
+            st.markdown(f"## {next_event['EventName']}")
+            st.markdown(f"**Round {next_event['RoundNumber']}** • {next_event['Location']}, {next_event['Country']}")
+            
+            # Show "Season Complete" instead of countdown
+            st.markdown(f"""
+            <div style="background: rgba(0, 200, 100, 0.1); border: 1px solid #00C864; border-radius: 8px; padding: 15px; text-align: center; margin-bottom: 20px;">
+                <h4 style="margin:0; color: #aaa;">SEASON {current_year}</h4>
+                <h1 style="margin:0; font-size: 2em; color: #00C864;">
+                    ✅ COMPLETE
+                </h1>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Session Schedule (all completed)
+            st.markdown("### 🗓️ Session Schedule")
+            sessions_df = []
+            for i in range(1, 6):
+                s_name = next_event[f'Session{i}']
+                s_date = next_event[f'Session{i}Date']
+                if s_name and pd.notna(s_date):
+                    sessions_df.append({
+                        "Session": s_name,
+                        "Time (Local/UTC)": s_date.strftime('%a %H:%M'),
+                        "Status": "✅ Completed"
+                    })
+            
+            st.dataframe(pd.DataFrame(sessions_df), hide_index=True, width='stretch')
+    else:
+        # Try previous year if current year has no events yet
+        try:
+            prev_schedule = fastf1.get_event_schedule(current_year - 1)
+            for col in ['EventDate', 'Session1Date', 'Session2Date', 'Session3Date', 'Session4Date', 'Session5Date']:
+                if col in prev_schedule.columns:
+                    prev_schedule[col] = pd.to_datetime(prev_schedule[col], utc=True)
+            
+            prev_completed = prev_schedule[prev_schedule['EventDate'] < now_utc]
+            if not prev_completed.empty:
+                next_event = prev_completed.iloc[-1]
+                st.info(f"📅 Showing last event from {current_year - 1} season")
+                
+                track_img = get_track_map_image(next_event)
+                col_map, col_info = st.columns([1, 1])
+                
+                with col_map:
+                    if track_img:
+                        st.markdown(f'''
+                        <div style="width: 500px; height: 600px; border-radius: 12px; border: 1px solid #333; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #1a1a1a;">
+                            <img src="{track_img}" style="width: 100%; height: 100%; object-fit: contain;">
+                        </div>
+                        ''', unsafe_allow_html=True)
+                    else:
+                        st.info("Track map currently unavailable.")
+                
+                with col_info:
+                    st.markdown(f"## {next_event['EventName']}")
+                    st.markdown(f"**Round {next_event['RoundNumber']}** • {next_event['Location']}, {next_event['Country']}")
+                    st.success(f"🏁 **{current_year - 1} Season Finale**")
+            else:
+                st.info("No events found. Check back soon for the new season schedule.")
+        except Exception as e:
+            st.info("No upcoming events found for this season.")
 
 st.markdown("---")
 
@@ -244,32 +337,35 @@ if not upcoming.empty:
             st.session_state['run_quick_pred'] = True
     
     if st.session_state.get('run_quick_pred'):
-        with st.spinner(f"Simulating {race_obj['EventName']}..."):
-            # Use Dynasty Engine logic
-            try:
-                preds = engine.predict_next_race(
-                    year=race_obj['EventDate'].year,
-                    race_name=race_obj['EventName'],
-                    n_sims=500
-                )
-                
-                if preds is not None and not preds.empty:
-                    top_pred = preds.head(5)
-                    st.success("Prediction Complete!")
+        if engine is None:
+            st.error("⚠️ Prediction engine is not available. Please check the application logs.")
+        else:
+            with st.spinner(f"Simulating {race_obj['EventName']}..."):
+                # Use Dynasty Engine logic
+                try:
+                    preds = engine.predict_next_race(
+                        year=race_obj['EventDate'].year,
+                        race_name=race_obj['EventName'],
+                        n_sims=500
+                    )
                     
-                    # Display as metrics
-                    cols = st.columns(5)
-                    for i, (idx, row) in enumerate(top_pred.iterrows()):
-                        with cols[i]:
-                            st.metric(
-                                label=f"P{i+1}: {row['Driver']}",
-                                value=f"{row['Win %']:.1f}% Win",
-                                delta=f"Avg Pos: {row['Avg Pos']:.1f}"
-                            )
-                    
-                    st.caption("Based on 500 Monte Carlo simulations using current season form and track characteristics.")
-                else:
-                    st.error("Prediction model returned no data. Ensure data ingestion is up to date.")
-            except Exception as e:
-                st.error(f"Prediction Error: {e}")
+                    if preds is not None and not preds.empty:
+                        top_pred = preds.head(5)
+                        st.success("Prediction Complete!")
+                        
+                        # Display as metrics
+                        cols = st.columns(5)
+                        for i, (idx, row) in enumerate(top_pred.iterrows()):
+                            with cols[i]:
+                                st.metric(
+                                    label=f"P{i+1}: {row['Driver']}",
+                                    value=f"{row['Win %']:.1f}% Win",
+                                    delta=f"Avg Pos: {row['Avg Pos']:.1f}"
+                                )
+                        
+                        st.caption("Based on 500 Monte Carlo simulations using current season form and track characteristics.")
+                    else:
+                        st.error("Prediction model returned no data. Ensure data ingestion is up to date.")
+                except Exception as e:
+                    st.error(f"Prediction Error: {e}")
 

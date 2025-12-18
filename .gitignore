@@ -125,3 +125,5 @@ ingest_2025_log.txt
 debug_log.txt
 f1_cache_dynasty/
 data/computed_telemetry/
+mlruns/
+

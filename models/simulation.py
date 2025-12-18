@@ -1,8 +1,11 @@
 import numpy as np
 import pandas as pd
 import joblib
+import logging
 from utils.db import get_supabase_client
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 class RaceSimulator:
     def __init__(self, model_path='models/saved/lap_time_model.pkl'):
@@ -25,19 +28,19 @@ class RaceSimulator:
         if not driver_ids:
             print("Using fallback logic for drivers...")
             # Get season of the requested race
-            race_info = self.supabase.table('races').select('season_year, date').eq('id', race_id).single().execute()
+            race_info = self.supabase.table('races').select('season_year, race_date').eq('id', race_id).single().execute()
             if race_info.data:
                 season = race_info.data['season_year']
-                date = race_info.data['date']
+                date = race_info.data['race_date']
                 print(f"Race season: {season}, date: {date}")
                 
                 # Find last race with data
                 last_race = self.supabase.table('races')\
                     .select('id, name')\
                     .eq('season_year', season)\
-                    .lt('date', date)\
-                    .eq('ingestion_complete', True)\
-                    .order('date', desc=True)\
+                    .lt('race_date', date)\
+                    .eq('ingestion_status', 'COMPLETE')\
+                    .order('race_date', desc=True)\
                     .limit(1)\
                     .execute()
                 
@@ -127,7 +130,7 @@ class RaceSimulator:
         predicted_grid = {}
         try:
             # Get current race date
-            race_info = self.supabase.table('races').select('date, season_year').eq('id', race_id).single().execute()
+            race_info = self.supabase.table('races').select('race_date, season_year').eq('id', race_id).single().execute()
             if not race_info.data:
                 return {d: 10 for d in driver_ids}
                 
@@ -164,10 +167,12 @@ class RaceSimulator:
 
     def simulate_race(self, race_id, total_laps=57, n_simulations=100):
         if not self.model:
+            logger.warning(f"No model loaded, cannot simulate race {race_id}")
             return None, None
 
         drivers_df = self.get_race_drivers(race_id)
         if drivers_df.empty:
+            logger.warning(f"No drivers found for race {race_id}")
             return None, None
             
         drivers_df = drivers_df.drop_duplicates(subset=['id'])

@@ -185,36 +185,27 @@ The app will be available at `http://localhost:8501`
 PitWall-AI/
 ├── app/                        # Streamlit web application
 │   ├── main.py                # Main dashboard entry point
-│   ├── components/            # Reusable UI components
-│   │   ├── sidebar.py        # Navigation sidebar
-│   │   ├── race_replay.py    # Race replay component
-│   │   └── charts.py         # Chart utilities
-│   └── pages/                 # Multi-page app
-│       ├── 1_Season_Central.py
-│       ├── 2_analytics.py
-│       ├── 3_predictions.py
-│       ├── 4_live_monitor.py
-│       ├── 5_race_engineer.py
-│       └── 6_past_races.py
-├── models/                     # ML models
-│   ├── dynasty_engine.py      # LightGBM Ranker + Elo system
-│   ├── hybrid_predictor.py    # XGBoost ensemble predictor
-│   ├── simulation.py          # Monte Carlo simulation engine
-│   ├── feature_engineering.py # Feature extraction pipeline
-│   └── saved/                 # Trained model artifacts
-├── utils/                      # Utility modules
-│   ├── db.py                  # Supabase database connection
-│   ├── race_utils.py          # Race data utilities
-│   └── ai.py                  # Google AI integration
-├── scripts/                    # Automation scripts
-│   ├── auto_update.py         # Scheduled data updates
-│   └── check_deployment.py    # Deployment verification
-├── docs/                       # Documentation
-│   └── screenshots/           # Application screenshots
-├── tests/                      # Test suite
-├── requirements.txt           # Python dependencies
-├── .env.example              # Environment template
-└── README.md                  # This file
+│   ├── pages/                 # Multi-page app (Analytics, Predictions, Admin, Settings)
+│   └── components/            # Reusable UI components
+├── agents/                     # AI Autonomous Agents
+│   ├── base.py                # Base agent framework
+│   ├── orchestrator.py        # Agent lifecycle manager
+│   ├── data_agent.py          # Autonomous ingestion
+│   ├── model_agent.py         # Model health monitoring
+│   └── strategy_agent.py      # AI Race Engineer
+├── models/                     # ML models & Registry
+│   ├── registry.py            # MLflow Registry Wrapper
+│   ├── hybrid_predictor.py    # Ensemble Model + SHAP
+│   └── dynasty_engine.py      # LightGBM Ranker
+├── feature_repo/               # Feast Feature Store
+│   └── definitions.py         # Feature Views & Entities
+├── pipelines/                  # Automated MLOps Pipelines
+│   └── orchestrator.py        # Central Data Pipeline
+├── utils/                      # Utilities (Logger, Error Handling, DB)
+├── tests/                      # Pytest Suite
+├── docker-compose.yml         # Container Orchestration
+├── Dockerfile                 # App Container
+└── requirements.txt           # Dependencies
 ```
 
 ---
@@ -246,11 +237,11 @@ python models/train_model.py
 | Category | Technologies |
 |----------|-------------|
 | **Frontend** | Streamlit, Plotly, Matplotlib |
-| **ML Models** | LightGBM, XGBoost, Scikit-learn |
-| **Data Processing** | Pandas, NumPy |
-| **F1 Data** | FastF1 API |
-| **Database** | Supabase (PostgreSQL) |
-| **AI Features** | Google Generative AI |
+| **ML Models** | LightGBM, XGBoost, SHAP (Explainability) |
+| **MLOps** | MLflow (Registry), Feast (Feature Store), Evidently (Monitoring) |
+| **AI Agents** | Python Threading, Custom Agent Framework |
+| **Infrastructure** | Docker, Docker Compose |
+| **Data** | FastF1 API, Supabase (PostgreSQL) |
 
 </div>
 

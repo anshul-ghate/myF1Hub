@@ -1,42 +1,61 @@
 import streamlit as st
+
+# Page Config - MUST be first Streamlit command
+st.set_page_config(page_title="Race Predictions", page_icon="🔮", layout="wide")
+
 import pandas as pd
 import joblib
 import os
 import numpy as np
 from utils.db import get_supabase_client
 from utils.race_utils import get_next_upcoming_race, get_seasons, get_rounds_for_season, get_race_lap_count, get_race_by_id
-from models.hybrid_predictor import HybridPredictor
-from models.dynasty_engine import get_track_dna
 from app.components.sidebar import render_sidebar
 
 # Inject Custom CSS
 def local_css(file_name):
-    with open(file_name) as f:
-        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+    try:
+        with open(file_name) as f:
+            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+    except:
+        pass
 
 local_css("app/assets/custom.css")
 
 # Render Sidebar
 render_sidebar()
 
-st.set_page_config(page_title="Race Predictions", page_icon="🔮", layout="wide")
-
-# Initialize Hybrid Predictor (no caching to ensure latest code is used)
+# Lazy import heavy modules to improve page load time
+@st.cache_resource
 def load_predictor():
-    predictor = HybridPredictor()
-    # Check for updates on load
-    if predictor.check_for_updates():
-        with st.spinner("🔄 New race data detected. Updating models..."):
-            predictor.train()
-    return predictor
+    """Load the hybrid predictor with error handling"""
+    try:
+        from models.hybrid_predictor import HybridPredictor
+        predictor = HybridPredictor()
+        return predictor
+    except Exception as e:
+        st.warning(f"⚠️ Hybrid Predictor unavailable: {e}")
+        return None
 
 # Cache in session state for performance within a session
-if 'predictor' not in st.session_state or st.sidebar.button("🔄 Reload Predictor"):
+if 'predictor' not in st.session_state:
+    with st.spinner("Loading prediction engine..."):
+        st.session_state['predictor'] = load_predictor()
+
+# Check for reload button
+if st.sidebar.button("🔄 Reload Predictor"):
+    st.cache_resource.clear()
     st.session_state['predictor'] = load_predictor()
+    st.rerun()
     
 engine = st.session_state['predictor']
 
 st.title("🏁 F1 Hybrid Prediction Engine v8.0")
+
+# Check if engine is available
+if engine is None:
+    st.error("⚠️ Prediction Engine is not available. Please check the logs for errors.")
+    st.info("The prediction system was unable to initialize. This may be due to missing dependencies or data issues.")
+    st.stop()
 
 # ========== RACE SELECTION ==========
 st.subheader("Select Race")
@@ -72,7 +91,7 @@ if selection_method == "🔥 Next Upcoming Race":
         with col3:
             st.metric("Round", next_race.get('round', 'N/A'))
         
-        st.info(f"📍 **Circuit**: {next_race.get('circuit_name', 'Unknown')} | 📅 **Date**: {next_race.get('date', 'TBD')}")
+        st.info(f"📍 **Circuit**: {next_race.get('circuit_name', 'Unknown')} | 📅 **Date**: {next_race.get('race_date', 'TBD')}")
     else:
         st.warning("No upcoming races found in the database. Please select manually.")
         selection_method = "📅 Select by Season & Round"
@@ -143,7 +162,13 @@ if selected_race_id:
                     st.success("✅ Prediction Complete!")
                     
                     # ===== TRACK INFORMATION =====
-                    track_dna = get_track_dna(selected_race_name)
+                    # Lazy import to avoid circular imports
+                    try:
+                        from models.dynasty_engine import get_track_dna
+                        track_dna = get_track_dna(selected_race_name)
+                    except ImportError:
+                        track_dna = {}
+                    
                     col_info1, col_info2, col_info3 = st.columns(3)
                     with col_info1:
                         st.metric("Circuit Type", track_dna['Type'])
@@ -253,6 +278,46 @@ if selected_race_id:
                                 """)
                         else:
                             st.info("Feature importances not available (model may need retraining)")
+                    
+                    # ===== SHAP EXPLANATIONS =====
+                    if getattr(engine, 'last_X_df', None) is not None:
+                        st.markdown("---")
+                        st.subheader("🕵️‍♀️ Individual Prediction Explainability (SHAP)")
+                        
+                        try:
+                            import shap
+                            import matplotlib.pyplot as plt
+                            
+                            shap_values = engine.explain_predictions(engine.last_X_df)
+                            
+                            if shap_values is not None:
+                                # Driver selector
+                                driver_list = getattr(engine, 'last_driver_names', [])
+                                if driver_list:
+                                    selected_driver_exp = st.selectbox("Select Driver to Explain", driver_list)
+                                    driver_idx = driver_list.index(selected_driver_exp)
+                                    
+                                    col_shap, col_text = st.columns([2, 1])
+                                    
+                                    with col_shap:
+                                        # Force matplotlib backend for Streamlit safety
+                                        fig, ax = plt.subplots(figsize=(10, 6))
+                                        shap.plots.waterfall(shap_values[driver_idx], show=False)
+                                        st.pyplot(fig)
+                                        plt.close(fig)
+                                    
+                                    with col_text:
+                                        st.markdown(f"""
+                                        **Interpretation for {selected_driver_exp}:**
+                                        
+                                        - **Red bars** push the prediction **higher** (better rank/result).
+                                        - **Blue bars** push the prediction **lower**.
+                                        - The base value is the average prediction.
+                                        """)
+                        except ImportError:
+                            st.warning("SHAP library not found. Install it to see explanations.")
+                        except Exception as e:
+                            st.error(f"Could not generate SHAP plot: {e}")
                     
                     # ===== METHODOLOGY EXPLAINER =====
                     st.markdown("---")

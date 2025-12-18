@@ -1,3 +1,9 @@
+import sys
+import os
+
+# Add project root to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import fastf1
 import pandas as pd
 import datetime
@@ -76,10 +82,10 @@ def ingest_bulk_history(start_year=2018):
                 
                 # Check if race already exists AND is complete
                 try:
-                    res = supabase.table('races').select('id, ingestion_complete').eq('season_year', year).eq('round', round_num).execute()
+                    res = supabase.table('races').select('id, ingestion_status').eq('season_year', year).eq('round', round_num).execute()
                     if res.data:
                         # If it exists and is marked complete, skip it
-                        if res.data[0].get('ingestion_complete', False):
+                        if res.data[0].get('ingestion_status') == 'COMPLETE':
                             # logger.info(f"Skipping {year} Round {round_num}: Already complete in DB.")
                             continue
                         else:

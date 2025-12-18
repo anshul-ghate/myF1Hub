@@ -1,33 +1,72 @@
-import fastf1 as ff1
 import pandas as pd
 import numpy as np
-import lightgbm as lgb
-from sklearn.base import BaseEstimator, TransformerMixin
 import os
 import logging
 import warnings
 from datetime import datetime
 import joblib
 
+# Lazy imports for heavy modules
+ff1 = None
+lgb = None
+mlflow = None
+ModelRegistry = None
+
+def _ensure_fastf1():
+    """Lazy load FastF1 and configure cache."""
+    global ff1
+    if ff1 is None:
+        import fastf1 as _ff1
+        ff1 = _ff1
+        from utils.api_config import configure_fastf1_retries
+        configure_fastf1_retries()
+        if not os.path.exists(CACHE_DIR):
+            os.makedirs(CACHE_DIR)
+        ff1.Cache.enable_cache(CACHE_DIR)
+    return ff1
+
+def _ensure_lightgbm():
+    """Lazy load LightGBM."""
+    global lgb
+    if lgb is None:
+        import lightgbm as _lgb
+        lgb = _lgb
+    return lgb
+
+def _ensure_mlflow():
+    """Lazy load MLflow."""
+    global mlflow
+    if mlflow is None:
+        import mlflow as _mlflow
+        import mlflow.lightgbm
+        mlflow = _mlflow
+    return mlflow
+
+def _ensure_registry():
+    """Lazy load ModelRegistry."""
+    global ModelRegistry
+    if ModelRegistry is None:
+        from models.registry import ModelRegistry as _ModelRegistry
+        ModelRegistry = _ModelRegistry
+    return ModelRegistry
+
+from sklearn.base import BaseEstimator, TransformerMixin
+
 # Suppress warnings
 warnings.filterwarnings('ignore')
 logging.getLogger('fastf1').setLevel(logging.ERROR)
 
-# --- CONFIG ---
-from utils.api_config import configure_fastf1_retries
-configure_fastf1_retries()
+# Module logger
+logger = logging.getLogger(__name__)
 
+# --- CONFIG ---
 CACHE_DIR = 'f1_cache_dynasty'
 MODEL_PATH = 'models/saved/dynasty_model.pkl'
 TRACKER_PATH = 'models/saved/dynasty_tracker.pkl'
 ENCODERS_PATH = 'models/saved/dynasty_encoders.pkl'
 
-if not os.path.exists(CACHE_DIR):
-    os.makedirs(CACHE_DIR)
 if not os.path.exists('models/saved'):
     os.makedirs('models/saved')
-
-ff1.Cache.enable_cache(CACHE_DIR)
 
 # --- TRACK DNA ---
 TRACK_DNA = {
@@ -141,6 +180,11 @@ class DynastyEngine:
         self.encoders = None
         self.train_df = None
         self.residuals = None
+        try:
+            self.registry = _ensure_registry()()
+        except Exception as e:
+            print(f"⚠️ ModelRegistry unavailable: {e}")
+            self.registry = None
         self.load_artifacts()
 
     def load_artifacts(self):
@@ -180,6 +224,7 @@ class DynastyEngine:
             
             # Get latest completed race from FastF1
             current_year = datetime.now().year
+            _ensure_fastf1()  # Ensure FastF1 is loaded
             schedule = ff1.get_event_schedule(current_year)
             completed = schedule[schedule['EventDate'] < datetime.now()]
             
@@ -231,8 +276,12 @@ class DynastyEngine:
                                 'Driver': row['Abbreviation'], 'Team': row['TeamName'],
                                 'Grid': row['GridPosition'], 'Position': row['Position'], 'Status': row['Status']
                             })
-                    except: continue
-            except: continue
+                    except Exception as e:
+                        logger.debug(f"Failed to load session for round {event['RoundNumber']}: {e}")
+                        continue
+            except Exception as e:
+                logger.debug(f"Failed to process year {year}: {e}")
+                continue
             
         df = pd.DataFrame(data)
         if df.empty: return False
@@ -276,21 +325,40 @@ class DynastyEngine:
         X_tr, y_tr = df[train_mask][FEATS], 21 - df[train_mask]['Position']
         g_tr = df[train_mask].groupby(['Year', 'Round']).size().to_numpy()
         
-        model = lgb.LGBMRanker(objective='lambdarank', metric='ndcg', n_estimators=600, learning_rate=0.03, random_state=42)
+        g_tr = df[train_mask].groupby(['Year', 'Round']).size().to_numpy()
+        
+        # Train Model
+        lgb = _ensure_lightgbm()  # Ensure LightGBM is loaded
+        params = {
+            'objective': 'lambdarank',
+            'metric': 'ndcg',
+            'n_estimators': 600,
+            'learning_rate': 0.03,
+            'random_state': 42
+        }
+        model = lgb.LGBMRanker(**params)
         model.fit(X_tr, y_tr, group=g_tr)
         
-        # Residuals
-        residuals = []
+        # Calculate Validation Metrics
         preds = model.predict(df[val_mask][FEATS])
+        residuals = []
         curr = 0
+        mae_accum = 0
+        count = 0
+        
         for _, grp in df[val_mask].groupby(['Year', 'Round']):
             n = len(grp)
             p = preds[curr:curr+n]
             curr += n
             ranks = (-p).argsort().argsort() + 1
-            residuals.extend(grp['Position'].values - ranks)
+            res = grp['Position'].values - ranks
+            residuals.extend(res)
+            mae_accum += np.abs(res).mean()
+            count += 1
             
-        # Save
+        avg_mae = mae_accum / count if count > 0 else 0
+        
+        # Save Artifacts locally first (needed for inference)
         self.model = model
         self.tracker = tracker
         self.encoders = (le_d, le_t, le_tt)
@@ -301,7 +369,24 @@ class DynastyEngine:
         joblib.dump(self.tracker.to_dict(), TRACKER_PATH)
         joblib.dump({'encoders': self.encoders, 'train_df': self.train_df, 'residuals': self.residuals}, ENCODERS_PATH)
         
-        print("✅ Dynasty Engine trained and saved.")
+        # Log to MLflow Registry (if available)
+        if self.registry:
+            try:
+                self.registry.log_model(
+                    model=model,
+                    model_name="DynastyRanker",
+                    model_type="lightgbm",
+                    metrics={"val_mae": avg_mae},
+                    params=params,
+                    artifacts={
+                        "tracker": TRACKER_PATH,
+                        "encoders": ENCODERS_PATH
+                    }
+                )
+            except Exception as e:
+                print(f"⚠️ MLflow logging failed: {e}")
+        
+        print("✅ Dynasty Engine trained, saved, and logged to Registry.")
         return True
 
     def predict_next_race(self, year, race_name, weather_forecast='Dry', n_sims=1000):
@@ -318,8 +403,9 @@ class DynastyEngine:
             if not session.results.empty:
                 grid = session.results[['Abbreviation', 'TeamName', 'GridPosition']]
             else: raise ValueError
-        except:
-            # Projection
+        except Exception as e:
+            # Grid acquisition failed, use projection
+            logger.info(f"Qualifying data unavailable for {race_name} ({year}), using projected grid: {e}")
             latest_year = self.train_df['Year'].max()
             active = self.train_df[self.train_df['Year'] == latest_year].drop_duplicates('Driver')
             active['Proj_Score'] = (active['Driver_Elo'] * 0.6) + (active['Team_Elo'] * 0.4)

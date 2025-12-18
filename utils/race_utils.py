@@ -22,63 +22,114 @@ configure_fastf1_retries()
 def get_track_map_image(_event):
     """
     Generate a track map image for the given event.
-    Skips if data is not readily available to avoid hanging.
+    Tries multiple years to find telemetry data.
     Note: _event uses underscore prefix to prevent Streamlit from hashing it for caching.
     """
     try:
         event_location = _event['Location']
         event_country = _event['Country']
         event_name = _event['EventName']
-        current_year = _event['EventDate'].year
         
-        # Try only current year - 1 to avoid long waits
-        year = current_year - 1
-        print(f"Attempting to load track map for {event_name} from {year}...")
+        # Pre-season testing circuit mapping (year -> (location, country))
+        TESTING_CIRCUITS = {
+            2025: ('Sakhir', 'Bahrain'),  # Bahrain International Circuit
+            2024: ('Sakhir', 'Bahrain'),
+            2023: ('Sakhir', 'Bahrain'),
+            2022: ('Barcelona', 'Spain'),  # Circuit de Barcelona-Catalunya
+            2021: ('Sakhir', 'Bahrain'),
+        }
         
-        # Get schedule for this year
-        schedule_year = fastf1.get_event_schedule(year)
+        # Handle testing events - use mapped circuit instead of skipping
+        is_testing = 'Testing' in str(event_name) or 'Test' in str(event_name) or _event.get('RoundNumber', 1) == 0
         
-        # Try matching by Location first (most reliable)
-        matching_event = schedule_year[schedule_year['Location'] == event_location]
+        if is_testing:
+            event_year = _event['EventDate'].year
+            if event_year in TESTING_CIRCUITS:
+                event_location, event_country = TESTING_CIRCUITS[event_year]
+                print(f"🧪 Pre-season testing: Using {event_location}, {event_country} for track map")
+            else:
+                print(f"⚠ Skipping track map for testing event: {event_name} (no circuit mapping)")
+                return None
         
-        # Fallback to Country match
-        if matching_event.empty:
-            matching_event = schedule_year[schedule_year['Country'] == event_country]
+        event_year = _event['EventDate'].year
         
-        if not matching_event.empty:
-            round_num = matching_event.iloc[0]['RoundNumber']
-            
-            # Try only Qualifying session (faster)
-            session = fastf1.get_session(year, round_num, 'Q')
-            session.load(laps=True, telemetry=True, weather=False, messages=False)
-            
-            # Get fastest lap telemetry
-            lap = session.laps.pick_fastest()
-            if lap is not None and not lap.empty:
-                pos = lap.get_telemetry().add_distance().add_relative_distance()
+        # Try multiple years: current year first, then previous years
+        years_to_try = [event_year, event_year - 1, event_year - 2, 2024, 2023]
+        # Remove duplicates while preserving order
+        years_to_try = list(dict.fromkeys(years_to_try))
+        
+        for year in years_to_try:
+            try:
+                print(f"🔍 Attempting to load track map for {event_location} from {year}...")
                 
-                # Create the plot
-                fig, ax = plt.subplots(figsize=(5, 3), facecolor='none')
-                ax.plot(pos['X'], pos['Y'], color='#FF1801', linewidth=2.5)
-                ax.axis('off')
-                ax.set_aspect('equal')
+                # Get schedule for this year
+                schedule_year = fastf1.get_event_schedule(year)
                 
-                # Save to buffer
-                buf = io.BytesIO()
-                fig.savefig(buf, format='svg', bbox_inches='tight', transparent=True)
-                buf.seek(0)
-                img_str = base64.b64encode(buf.getvalue()).decode('utf-8')
-                plt.close(fig)
+                # Filter out testing events (round 0)
+                schedule_year = schedule_year[schedule_year['RoundNumber'] > 0]
                 
-                print(f"✓ Successfully loaded track map from {year}")
-                return f"data:image/svg+xml;base64,{img_str}"
+                # Try matching by Location first (most reliable)
+                matching_event = schedule_year[schedule_year['Location'] == event_location]
+                
+                # Fallback to Country match
+                if matching_event.empty:
+                    matching_event = schedule_year[schedule_year['Country'] == event_country]
+                
+                # Fallback to partial name match
+                if matching_event.empty:
+                    matching_event = schedule_year[schedule_year['EventName'].str.contains(event_location, case=False, na=False)]
+                
+                if matching_event.empty:
+                    print(f"  ⚠ No matching event found in {year}")
+                    continue
+                
+                round_num = int(matching_event.iloc[0]['RoundNumber'])
+                
+                # Try Qualifying session first (faster), fallback to Race
+                for session_type in ['Q', 'R']:
+                    try:
+                        session = fastf1.get_session(year, round_num, session_type)
+                        session.load(laps=True, telemetry=True, weather=False, messages=False)
+                        
+                        # Get fastest lap telemetry
+                        lap = session.laps.pick_fastest()
+                        if lap is not None and not getattr(lap, 'empty', True):
+                            pos = lap.get_telemetry()
+                            if pos is not None and not pos.empty and 'X' in pos.columns and 'Y' in pos.columns:
+                                pos = pos.add_distance().add_relative_distance()
+                                
+                                # Create the plot
+                                fig, ax = plt.subplots(figsize=(5, 3), facecolor='none')
+                                ax.plot(pos['X'], pos['Y'], color='#FF1801', linewidth=2.5)
+                                ax.axis('off')
+                                ax.set_aspect('equal')
+                                
+                                # Save to buffer
+                                buf = io.BytesIO()
+                                fig.savefig(buf, format='svg', bbox_inches='tight', transparent=True)
+                                buf.seek(0)
+                                img_str = base64.b64encode(buf.getvalue()).decode('utf-8')
+                                plt.close(fig)
+                                
+                                print(f"✓ Successfully loaded track map from {year} {session_type}")
+                                return f"data:image/svg+xml;base64,{img_str}"
+                    except Exception as sess_err:
+                        print(f"  ⚠ {session_type} session failed: {sess_err}")
+                        continue
+                        
+            except Exception as year_err:
+                print(f"  ⚠ Year {year} failed: {year_err}")
+                continue
         
-        print(f"⚠ Could not generate track map for {event_name}")
+        print(f"⚠ Could not generate track map for {event_name} after trying multiple years")
         return None
         
     except Exception as e:
         print(f"❌ Error generating track map: {e}")
+        import traceback
+        traceback.print_exc()
         return None
+
 
 def get_next_upcoming_race():
     """
@@ -90,16 +141,17 @@ def get_next_upcoming_race():
         now = datetime.now(timezone.utc)
         
         # Fetch races with date information, ordered by date
-        result = supabase.table('races').select('*').order('date', desc=False).execute()
+        # Note: schema_v3 uses 'race_date' column, not 'date'
+        result = supabase.table('races').select('*').order('race_date', desc=False).execute()
         
         if not result.data:
             return None
         
         # Find the first race whose date is in the future
         for race in result.data:
-            if race.get('date'):
+            if race.get('race_date'):
                 # Parse race date
-                race_date = pd.to_datetime(race['date'])
+                race_date = pd.to_datetime(race['race_date'])
                 
                 # Make timezone-aware if needed
                 if race_date.tzinfo is None:

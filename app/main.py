@@ -38,8 +38,14 @@ fastf1.Cache.enable_cache('f1_cache')
 render_sidebar()
 
 # --- Logic for Next Race ---
+# Import time simulation for debug mode support
+from utils.time_simulation import get_current_time, is_debug_mode, render_debug_panel
+
+# Render debug panel if in debug mode
+render_debug_panel()
+
 @st.cache_data(ttl=300)  # Reduced TTL to 5 mins for quicker season transition detection
-def get_schedule_with_fallback():
+def get_schedule_with_fallback(_simulated_time=None):
     """
     Get event schedule with fallback to next year if current season is over.
     Returns (schedule, is_next_year_schedule, season_status).
@@ -49,8 +55,11 @@ def get_schedule_with_fallback():
     - 'final_race_live': The final race of the season is currently in progress
     - 'season_ended': The final race has completed, showing next season
     - 'preseason': Showing pre-season testing from next year
+    
+    Note: _simulated_time is passed for cache busting in debug mode
     """
-    now = datetime.datetime.now(pytz.utc)
+    # Use time simulation for debug mode
+    now = get_current_time()
     current_year = now.year
     
     try:
@@ -143,8 +152,10 @@ if __name__ == "__main__":
     run_auto_update()
 
     try:
-        schedule, is_next_year, season_status = get_schedule_with_fallback()
-        now_utc = datetime.datetime.now(pytz.utc)
+        # Pass simulated time as cache buster for debug mode
+        simulated = get_current_time() if is_debug_mode() else None
+        schedule, is_next_year, season_status = get_schedule_with_fallback(simulated)
+        now_utc = get_current_time()
         
         # Filter for upcoming events (with 3-day buffer)
         if not schedule.empty:

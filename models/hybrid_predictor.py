@@ -5,21 +5,80 @@ Combines multiple ML models with Monte Carlo simulation for maximum accuracy.
 
 import numpy as np
 import pandas as pd
-import lightgbm as lgb
-import xgboost as xgb
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
 import joblib
 import os
 import warnings
 from datetime import datetime
-import fastf1 as ff1
+import logging
 
-from models.enhanced_features import F1FeatureEngineer
-from models.dynasty_engine import DynastyEngine, EloTracker, get_track_dna
+# Lazy imports for heavy modules
+_lgb = None
+_xgb = None
+_ff1 = None
+_mlflow = None
+_shap = None
+_ModelRegistry = None
+
+def _ensure_lightgbm():
+    global _lgb
+    if _lgb is None:
+        import lightgbm
+        _lgb = lightgbm
+    return _lgb
+
+def _ensure_xgboost():
+    global _xgb
+    if _xgb is None:
+        import xgboost
+        _xgb = xgboost
+    return _xgb
+
+def _ensure_fastf1():
+    global _ff1
+    if _ff1 is None:
+        import fastf1
+        _ff1 = fastf1
+        if not os.path.exists(CACHE_DIR):
+            os.makedirs(CACHE_DIR)
+        _ff1.Cache.enable_cache(CACHE_DIR)
+    return _ff1
+
+def _ensure_mlflow():
+    global _mlflow
+    if _mlflow is None:
+        import mlflow
+        import mlflow.lightgbm
+        import mlflow.xgboost
+        _mlflow = mlflow
+    return _mlflow
+
+def _ensure_shap():
+    global _shap
+    if _shap is None:
+        try:
+            import shap
+            _shap = shap
+        except ImportError:
+            _shap = False  # Marker for unavailable
+    return _shap if _shap is not False else None
+
+def _ensure_registry():
+    global _ModelRegistry
+    if _ModelRegistry is None:
+        from models.registry import ModelRegistry
+        _ModelRegistry = ModelRegistry
+    return _ModelRegistry
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+
+# Lazy import of heavy local modules (deferred to __init__)
+# from models.enhanced_features import F1FeatureEngineer
+# from models.dynasty_engine import DynastyEngine, EloTracker, get_track_dna
 from utils.db import get_supabase_client
 
 warnings.filterwarnings('ignore')
+logger = logging.getLogger(__name__)
 
 # Paths
 MODEL_DIR = 'models/saved/hybrid'
@@ -27,10 +86,6 @@ CACHE_DIR = 'f1_cache_dynasty'
 
 if not os.path.exists(MODEL_DIR):
     os.makedirs(MODEL_DIR)
-if not os.path.exists(CACHE_DIR):
-    os.makedirs(CACHE_DIR)
-
-ff1.Cache.enable_cache(CACHE_DIR)
 
 
 class HybridPredictor:
@@ -44,8 +99,19 @@ class HybridPredictor:
     
     def __init__(self):
         self.supabase = get_supabase_client()
+        
+        # Lazy load heavy modules only when predictor is instantiated
+        from models.enhanced_features import F1FeatureEngineer
+        from models.dynasty_engine import DynastyEngine, EloTracker, get_track_dna
+        
         self.feature_engineer = F1FeatureEngineer()
         self.dynasty_engine = DynastyEngine()
+        
+        try:
+            self.registry = _ensure_registry()()
+        except Exception as e:
+            print(f"⚠️ ModelRegistry unavailable: {e}")
+            self.registry = None
         
         # Models
         self.ranker_model = None
@@ -59,6 +125,14 @@ class HybridPredictor:
         
         # Load existing models
         self.load_models()
+
+        # MLflow Setup
+        try:
+            mlflow = _ensure_mlflow()
+            mlflow.set_tracking_uri("file:./mlruns")
+            mlflow.set_experiment("F1_Hybrid_Predictor")
+        except Exception as e:
+            print(f"⚠️ MLflow setup failed: {e}")
     
     def load_models(self):
         """Load saved models if they exist."""
@@ -117,16 +191,16 @@ class HybridPredictor:
         try:
             # Get latest race in database
             latest_race = self.supabase.table('races')\
-                .select('season_year, round, date')\
-                .eq('ingestion_complete', True)\
-                .order('date', desc=True)\
+                .select('season_year, round, race_date')\
+                .eq('ingestion_status', 'COMPLETE')\
+                .order('race_date', desc=True)\
                 .limit(1)\
                 .execute()
             
             if not latest_race.data:
                 return False
             
-            latest_date = pd.to_datetime(latest_race.data[0]['date'])
+            latest_date = pd.to_datetime(latest_race.data[0]['race_date'])
             last_trained_date = pd.to_datetime(self.last_trained)
             
             if latest_date > last_trained_date:
@@ -161,7 +235,7 @@ class HybridPredictor:
             races_res = self.supabase.table('races')\
                 .select('id, season_year')\
                 .gte('season_year', min_year)\
-                .eq('ingestion_complete', True)\
+                .eq('ingestion_status', 'COMPLETE')\
                 .execute()
             
             if not races_res.data:
@@ -203,6 +277,8 @@ class HybridPredictor:
         
         # 3. Train models
         print("\n[3/3] Training prediction models...")
+
+
         
         # Model A: LightGBM Ranker
         print("   Training LightGBM Ranker...")
@@ -212,6 +288,8 @@ class HybridPredictor:
             
             # Convert positions to relevance scores (higher is better)
             y_train_relevance = 21 - y_train
+            
+            lgb = _ensure_lightgbm()
             
             self.ranker_model = lgb.LGBMRanker(
                 objective='lambdarank',
@@ -239,6 +317,8 @@ class HybridPredictor:
         # Model B: XGBoost Position Predictor
         print("   Training XGBoost Position Predictor...")
         try:
+            xgb = _ensure_xgboost()
+            
             self.position_model = xgb.XGBRegressor(
                 objective='reg:squarederror',
                 n_estimators=400,
@@ -273,13 +353,51 @@ class HybridPredictor:
             print("\n   📊 Top 10 Most Important Features:")
             for feat, imp in sorted_features[:10]:
                 print(f"      {feat}: {imp:.4f}")
-        
-        # Save models
-        self.last_trained = datetime.now().isoformat()
-        self.save_models()
-        
-        print("\n✅ Hybrid Predictor training complete!")
+            
+            # Save models locally first
+            self.last_trained = datetime.now().isoformat()
+            self.save_models()
+            self.feature_importances = getattr(self, 'feature_importances', {})
+
+            # Log Ranker to Registry
+            if self.ranker_model:
+                self.registry.log_model(
+                    model=self.ranker_model,
+                    model_name="HybridRanker",
+                    model_type="lightgbm",
+                    metrics={}, # Could add val metrics here if captured
+                    params={
+                        "n_estimators": 500,
+                        "learning_rate": 0.03,
+                        "num_leaves": 31
+                    },
+                    artifacts={
+                        "scaler": os.path.join(MODEL_DIR, 'scaler.pkl'),
+                        "metadata": os.path.join(MODEL_DIR, 'metadata.pkl')
+                    }
+                )
+
+            # Log Position Model to Registry
+            if self.position_model:
+                self.registry.log_model(
+                    model=self.position_model,
+                    model_name="HybridPositionModel",
+                    model_type="xgboost",
+                    metrics={}, 
+                    params={
+                        "n_estimators": 400,
+                        "max_depth": 6,
+                        "learning_rate": 0.05
+                    },
+                    artifacts={
+                        "scaler": os.path.join(MODEL_DIR, 'scaler.pkl'),
+                        "metadata": os.path.join(MODEL_DIR, 'metadata.pkl')
+                    }
+                )
+            
+            print("\n✅ Hybrid Predictor training complete and logged to Registry!")
         return True
+
     
     def predict_race(self, year, race_name, weather_forecast='Dry', n_sims=5000):
         """
@@ -303,12 +421,15 @@ class HybridPredictor:
         print(f"\n🔮 Predicting {year} {race_name}")
         print(f"   Weather: {weather_forecast}, Simulations: {n_sims:,}")
         
-        # Get track DNA
+        # Get track DNA (import here to avoid circular imports)
+        from models.dynasty_engine import get_track_dna
         dna = get_track_dna(race_name)
         print(f"   Track Type: {dna['Type']}, Overtaking: {dna['Overtaking']}/10")
         
         # Get grid (from qualifying or predict it)
         try:
+            ff1 = _ensure_fastf1()
+            
             session = ff1.get_session(year, race_name, 'Q')
             session.load(laps=False, telemetry=False, weather=False, messages=False)
             
@@ -380,10 +501,17 @@ class HybridPredictor:
             X_pred = pd.DataFrame([d[3] for d in driver_scores])[self.feature_names]
             if self.scaler:
                  X_pred_scaled = self.scaler.transform(X_pred)
+                 # Cache for SHAP (restore column names for interpretability)
+                 self.last_X_df = pd.DataFrame(X_pred_scaled, columns=X_pred.columns)
+                 self.last_driver_names = [d[0] for d in driver_scores]
             else:
                  X_pred_scaled = None
-        except:
+                 self.last_X_df = None
+                 self.last_driver_names = []
+        except Exception as e:
+            logger.warning(f"Feature matrix creation failed: {e}")
             X_pred_scaled = None
+
         
         # Get predictions from both models
         ranker_scores = None
@@ -426,7 +554,7 @@ class HybridPredictor:
         
         # Get driver characteristics for simulation
         reliabilities = []
-        for _, team, _, _ in driver_scores:
+        for abbr, team, grid, features, _, _ in driver_scores:
             rel = self.feature_engineer.get_team_reliability(team)
             reliabilities.append(rel)
         reliabilities = np.array(reliabilities)
@@ -532,6 +660,25 @@ class HybridPredictor:
                 print(f"Error getting Dynasty Engine importances: {e}")
         
         return None
+
+    def explain_predictions(self, X_df):
+        """Generate SHAP values for the given feature set."""
+        shap = _ensure_shap()
+        if not shap:
+            logger.warning("SHAP not installed.")
+            return None
+            
+        if not self.ranker_model:
+            return None
+            
+        try:
+            # SHAP TreeExplainer works well with LightGBM
+            explainer = shap.TreeExplainer(self.ranker_model)
+            shap_values = explainer(X_df)
+            return shap_values
+        except Exception as e:
+            logger.error(f"SHAP explanation failed: {e}")
+            return None
 
 
 if __name__ == "__main__":
