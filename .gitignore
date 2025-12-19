@@ -126,4 +126,5 @@ debug_log.txt
 f1_cache_dynasty/
 data/computed_telemetry/
 mlruns/
+run_local.ps1
 
