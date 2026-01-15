@@ -32,37 +32,26 @@ class ModelAgent(BaseAgent):
     def check_model_freshness(self, force=False):
         """Check if production model is too old."""
         try:
-            # Get production model details
-            # Using private API of registry or we need to add a method to get model metadata
-            # Assuming get_latest_version returns the version object which has creation_timestamp
+            # Check existense and metadata
+            metadata = self.registry.get_model_metadata("HybridRanker", stage="Production")
             
-            # Since ModelRegistry.load_model returns the model object, not metadata,
-            # we might need to query MLflow directly or add a method to Registry.
-            # For this MVP, we will try to load the model and check 'last_trained' attribute if available
-            # OR we just trigger the pipeline which internally checks 'last_trained' date in HybridPredictor
-            
-            # HybridPredictor check_for_updates() does exactly this logic.
-            # So ModelAgent can just run the pipeline?
-            # But the pipeline performs ingestion first.
-            
-            # Let's rely on the Orchestrator's run_pipeline logic for now, 
-            # but usually ModelAgent would handle the *decision* to retrain.
-            
-            # If we want to be "Agentic", we should check explicitly.
-            # But HybridPredictor logic is: "if latest_date > last_trained_date".
-            
-            # Implementation:
-            # 1. Trigger pipeline (which is safe/idempotent-ish).
-            # OR
-            # 2. Just log status.
-            
-            # Let's verify model existence
-            model = self.registry.load_model("HybridRanker", stage="Production")
-            if not model and not force:
+            if not metadata and not force:
                 self.logger.warning("No Production model found! Triggering training.")
-                run_pipeline() # This runs ingestion too, which is fine
+                run_pipeline()
                 self.publish("retraining_triggered", {"reason": "missing_model"})
                 return
+
+            # Check age
+            if metadata:
+                creation_time = datetime.fromtimestamp(metadata.creation_timestamp / 1000)
+                age = datetime.now() - creation_time
+                self.logger.info(f"Model age: {age.days} days (Created: {creation_time})")
+
+                if age.days > self.max_model_age_days or force:
+                    self.logger.info("Model is too old or force update requested. Triggering pipeline...")
+                    run_pipeline()
+                    self.publish("retraining_triggered", {"reason": "model_stale", "age_days": age.days})
+                    return
 
             self.logger.info("Model health check passed.")
             self.publish("model_health_check", {"status": "healthy"})

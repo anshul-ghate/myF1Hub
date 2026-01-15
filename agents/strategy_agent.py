@@ -38,5 +38,25 @@ class StrategyAgent(BaseAgent):
         except Exception as e:
             self.logger.error(f"Strategy analysis failed: {e}")
 
+    def chat(self, user_message):
+        """
+        Direct chat interface for the Strategy Agent.
+        Delegates to RaceEngineer with Strategy Agent's context.
+        """
+        self.logger.info(f"Received chat message: {user_message}")
+        try:
+            response = self.engineer.ask(user_message)
+            return response
+        except Exception as e:
+            self.logger.error(f"Chat failed: {e}")
+            return "I'm having trouble connecting to the pit wall. Please try again."
+
+    def analyze_session_commentary(self, commentary_text):
+        """
+        Analyze a full session commentary log.
+        """
+        self.logger.info("Analyzing session commentary...")
+        return self.engineer.analyze_commentary(commentary_text)
+
     def on_start(self):
         self.publish("agent_status", {"name": self.name, "status": "online"})

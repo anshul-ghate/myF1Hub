@@ -1,308 +1,130 @@
-<div align="center">
+# 🏎️ F1 PitWall AI - Advanced Race Strategy & Analytics Platform
 
-# 🏎️ PitWall AI
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Streamlit](https://img.shields.io/badge/streamlit-1.28%2B-FF4B4B)
+![Status](https://img.shields.io/badge/status-production--ready-green)
 
-### AI-Powered Formula 1 Race Strategy & Prediction Platform
-
-[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.28+-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://streamlit.io)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
-[![FastF1](https://img.shields.io/badge/FastF1-Powered-E10600?style=for-the-badge)](https://github.com/theOehrly/Fast-F1)
-
-*Advanced machine learning models combining LightGBM, XGBoost, and Monte Carlo simulations to predict F1 race outcomes with statistical confidence.*
+**F1 PitWall AI** is a state-of-the-art predictive analytics platform for Formula 1, powered by hybrid machine learning models and real-time telemetry processing. It provides race engineers, strategists, and fans with professional-grade insights, live race monitoring, and "what-if" scenario simulation.
 
 ---
 
-</div>
+## 🚀 Key Features
 
-## 📸 Screenshots
+### 🧠 Hybrid Prediction Engine
+- **Multi-Model Architecture**: Combines **LightGBM Ranker** (for relative performance) and **XGBoost Regressor** (for lap-time delta) with a **Monte Carlo** simulation layer.
+- **Dynamic Elo Ratings**: Real-time driver and team skill quantification that evolves race-by-race.
+- **Track DNA Analysis**: Classifies circuits by characteristics (e.g., "Street_Fast", "Power", "Technical") to predict suitability.
 
-<div align="center">
+### 📡 Real-Time Telemetry Monitor
+- **Live Race Visualization**: Watch driver positions, gaps, and telemetry (Speed, Gear, DRS) in real-time using OpenF1 API.
+- **Strategy Analysis**: Live tyre degradation monitoring and pit window tracking.
+- **Weather Integration**: Rain probability and track temperature monitoring.
 
-### Dashboard Overview
-![Home Dashboard](docs/screenshots/home_dashboard.png)
+### 🔬 Deep Dive Analytics
+- **Interactive Telemetry Comparison**: Compare lap traces between any two drivers (Speed vs Distance).
+- **3D Track Mapping**: Visualize speed and gear usage on a 3D circuit model.
+- **Season Central**: Comprehensive dashboard for championship standings, calendar, and results.
 
-### Season Central - Championship Standings & Trends
-![Season Central](docs/screenshots/season_central.png)
-
-### Race Analytics - Deep Dive Into Race Data
-![Race Analytics](docs/screenshots/race_analytics.png)
-
-### Race Predictions - Monte Carlo Simulations
-![Race Predictions](docs/screenshots/race_predictions.png)
-
-### Past Races - Historical Race Replay
-![Past Races](docs/screenshots/past_races.png)
-
-</div>
+### 🤖 AI Race Engineer ("Olof")
+- **Natural Language Interface**: Ask questions like *"What is Verstappen's average lap time on Hards?"* or *"Who has the best sector 3?"*
+- **RAG-Powered**: Retrieval-Augmented Generation system with access to live session data and historical records.
 
 ---
 
-## ✨ Features
+## 🏗️ Architecture
 
-### 🎯 Race Predictions
-- **Monte Carlo Simulation Engine** - Run thousands of simulations for probabilistic race outcome predictions
-- **Hybrid ML Models** - Ensemble of LightGBM Ranker and XGBoost Regressor for maximum accuracy
-- **Weather-Aware Predictions** - Adjust predictions based on wet/dry conditions
-- **Confidence Intervals** - Statistical confidence levels for all predictions
-
-### 📊 Season Analytics
-- **Championship Progression** - Interactive charts showing driver and constructor standings over time
-- **Teammate Comparisons** - Head-to-head performance analysis within teams
-- **Points Trajectory** - Visualize championship battles and momentum shifts
-
-### 🏁 Race Analytics
-- **Lap Time Analysis** - Detailed lap-by-lap performance breakdowns
-- **Tire Strategy Insights** - Compound degradation and pit stop optimization
-- **Position Progression** - Interactive race position charts
-- **Sector Performance** - Track segment analysis with driver comparisons
-
-### 📡 Live Race Monitor
-- **Real-Time Timing** - Live position and lap time updates during races
-- **Dynamic Track Map** - Visual representation of driver positions on track
-- **Gap Analysis** - Real-time gap calculations between drivers
-- **Pit Stop Alerts** - Instant notifications for pit activity
-
-### 🔬 Race Engineer AI
-- **AI-Powered Insights** - Natural language race strategy recommendations
-- **Historical Pattern Analysis** - Data-driven strategy suggestions based on past races
-- **What-If Scenarios** - Explore alternative strategy outcomes
-
-### 📜 Past Race Replay
-- **Historical Race Data** - Access complete data from past F1 seasons (2018+)
-- **Race Reconstruction** - Step-by-step replay of historical races
-- **Performance Comparison** - Compare driver performances across different races
-
----
-
-## 🧠 Model Architecture
-
-PitWall AI employs a sophisticated multi-model ensemble approach:
-
-### DynastyEngine (LightGBM Ranker)
-The core prediction engine using a **LambdaRank** objective optimized for ranking race positions:
-
-- **Elo Rating System** - Dynamic driver and team ratings updated after each race
-- **Track DNA Classification** - Circuit-specific characteristics (High-Speed, Technical, Street, Balanced)
-- **Feature Engineering Pipeline**:
-  - Driver Elo ratings (individual performance tracking)
-  - Team Elo ratings (constructor performance)
-  - Track type encoding (one-hot encoded circuit characteristics)
-  - Overtaking difficulty coefficient
-  - Weather conditions encoding
-
-### HybridPredictor (XGBoost Ensemble)
-An enhanced prediction layer combining multiple models:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    HybridPredictor Pipeline                  │
-├─────────────────────────────────────────────────────────────┤
-│  Input Features                                              │
-│  ├── Driver/Team Elo Ratings                                │
-│  ├── Track DNA (Type, Overtaking Score)                     │
-│  ├── Recent Form (Last 3 races)                             │
-│  ├── Grid Position                                          │
-│  └── Weather Forecast                                        │
-├─────────────────────────────────────────────────────────────┤
-│  Models                                                      │
-│  ├── LightGBM Ranker (position ranking)                     │
-│  ├── XGBoost Regressor (expected position)                  │
-│  └── Residual Sampling (uncertainty quantification)          │
-├─────────────────────────────────────────────────────────────┤
-│  Monte Carlo Simulation (N=5000)                             │
-│  └── Produces probability distributions for each position   │
-├─────────────────────────────────────────────────────────────┤
-│  Output                                                      │
-│  ├── Expected Finish Position                               │
-│  ├── Win Probability %                                      │
-│  ├── Podium Probability %                                   │
-│  └── Points Expectation                                      │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    user((User)) -->|Interacts| UI[Streamlit Frontend]
+    
+    subgraph "Data Layer"
+        FF1[FastF1 API] -->|Historical Data| Ingest[Data Ingestion]
+        OF1[OpenF1 API] -->|Live Telemetry| Live[Live Monitor]
+        Supabase[(Supabase DB)] -->|Persists| Ingest
+    end
+    
+    subgraph "ML Core (Dynasty Engine)"
+        Ingest --> Features[Feature Engineering]
+        Features --> Elo[Elo Tracker]
+        Features --> Encoders[Robust Encoders]
+        
+        Elo --> Hybrid[Hybrid Predictor]
+        Encoders --> Hybrid
+        
+        Hybrid -->|Raw Preds| MonteCarlo[Monte Carlo Sim]
+        MonteCarlo -->|Probs| UI
+    end
+    
+    subgraph "AI Assistant"
+        UI -->|Query| Agent[Race Engineer Agent]
+        Agent -->|RAG| VectorDB[Vector Knowledge Base]
+        Agent -->|Context| Live
+    end
 ```
 
-### Track DNA System
-Each circuit is classified with unique characteristics:
-
-| Track Type | Characteristics | Example Circuits |
-|------------|-----------------|------------------|
-| **High_Speed** | Long straights, high top speeds | Monza, Spa, Las Vegas |
-| **Technical** | Complex corners, requires precision | Monaco, Singapore, Hungary |
-| **Street_Fast** | Street circuits with fast sections | Jeddah, Melbourne |
-| **Balanced** | Mix of speed and technical sections | Bahrain, Abu Dhabi |
-
----
-
-## 🚀 Getting Started
+## 🛠️ Installation & Setup
 
 ### Prerequisites
-- Python 3.9+
-- Supabase account (for database storage)
-- Google AI API key (optional, for AI-powered insights)
+- Python 3.10 or higher
+- [Optional] Supabase account for cloud persistence (defaults to local cache if not provided)
 
-### Installation
-
-1. **Clone the repository**
+### 1. Clone the Repository
 ```bash
-git clone https://github.com/anshul-ghate/PitWall-AI.git
-cd PitWall-AI
+git clone https://github.com/your-org/f1-pitwall-ai.git
+cd f1-pitwall-ai
 ```
 
-2. **Create virtual environment**
-```bash
-# Windows
-python -m venv .venv
-.\.venv\Scripts\Activate
-
-# macOS/Linux
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-3. **Install dependencies**
+### 2. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-4. **Configure environment**
+### 3. Environment Configuration
+Create a `.env` file in the root directory:
 ```bash
-cp .env.example .env
-# Edit .env with your credentials
+# Optional: For AI Assistant features
+GOOGLE_API_KEY=your_gemini_key
+
+# Optional: For Database persistence
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_key
 ```
 
-5. **Run the application**
+### 4. Run the Application
 ```bash
 streamlit run app/main.py
 ```
 
-The app will be available at `http://localhost:8501`
-
 ---
 
-## 📁 Project Structure
+## 🧪 Testing & Validation
 
-```
-PitWall-AI/
-├── app/                        # Streamlit web application
-│   ├── main.py                # Main dashboard entry point
-│   ├── pages/                 # Multi-page app (Analytics, Predictions, Admin, Settings)
-│   └── components/            # Reusable UI components
-├── agents/                     # AI Autonomous Agents
-│   ├── base.py                # Base agent framework
-│   ├── orchestrator.py        # Agent lifecycle manager
-│   ├── data_agent.py          # Autonomous ingestion
-│   ├── model_agent.py         # Model health monitoring
-│   └── strategy_agent.py      # AI Race Engineer
-├── models/                     # ML models & Registry
-│   ├── registry.py            # MLflow Registry Wrapper
-│   ├── hybrid_predictor.py    # Ensemble Model + SHAP
-│   └── dynasty_engine.py      # LightGBM Ranker
-├── feature_repo/               # Feast Feature Store
-│   └── definitions.py         # Feature Views & Entities
-├── pipelines/                  # Automated MLOps Pipelines
-│   └── orchestrator.py        # Central Data Pipeline
-├── utils/                      # Utilities (Logger, Error Handling, DB)
-├── tests/                      # Pytest Suite
-├── docker-compose.yml         # Container Orchestration
-├── Dockerfile                 # App Container
-└── requirements.txt           # Dependencies
-```
+The project includes a comprehensive CI/CD pipeline (`.github/workflows/ci.yml`) that runs:
+- **Linting**: Ruff & Black for code quality.
+- **Unit Tests**: `pytest` suite for model validation.
+- **Security Scans**: Bandit & Safety for vulnerability checks.
 
----
-
-## 🔧 Configuration
-
-### Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `SUPABASE_URL` | Supabase project URL | ✅ |
-| `SUPABASE_KEY` | Supabase service role key | ✅ |
-| `GOOGLE_API_KEY` | Google AI API key | Optional |
-
-### Model Training
-
-To retrain the prediction models with latest data:
-
+To run tests locally:
 ```bash
-python models/train_model.py
+pytest tests/
 ```
-
----
-
-## 📊 Technologies
-
-<div align="center">
-
-| Category | Technologies |
-|----------|-------------|
-| **Frontend** | Streamlit, Plotly, Matplotlib |
-| **ML Models** | LightGBM, XGBoost, SHAP (Explainability) |
-| **MLOps** | MLflow (Registry), Feast (Feature Store), Evidently (Monitoring) |
-| **AI Agents** | Python Threading, Custom Agent Framework |
-| **Infrastructure** | Docker, Docker Compose |
-| **Data** | FastF1 API, Supabase (PostgreSQL) |
-
-</div>
-
----
-
-## 🚀 Deployment
-
-### Streamlit Community Cloud (Recommended)
-
-1. Push your code to GitHub
-2. Visit [share.streamlit.io](https://share.streamlit.io)
-3. Connect your repository
-4. Set main file: `app/main.py`
-5. Add secrets in app settings:
-   ```toml
-   GOOGLE_API_KEY = "your_key"
-   SUPABASE_URL = "your_url"
-   SUPABASE_KEY = "your_key"
-   ```
-6. Deploy!
-
-For detailed instructions, see [DEPLOYMENT.md](DEPLOYMENT.md)
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please follow these steps:
+1. Fork the repository.
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`).
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`).
+4. Push to the branch (`git push origin feature/AmazingFeature`).
+5. Open a Pull Request.
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+## 📄 License
 
----
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Distributed under the MIT License. See `LICENSE` for more information.
 
 ---
 
-## ⚠️ Disclaimer
-
-This application is for **educational and entertainment purposes only**. Predictions are based on historical data and statistical models and should not be used for betting or financial decisions.
-
----
-
-## 🙏 Acknowledgments
-
-- [FastF1](https://github.com/theOehrly/Fast-F1) - Exceptional F1 data API
-- [Supabase](https://supabase.com/) - Database infrastructure
-- The Formula 1 community for inspiration
-
----
-
-<div align="center">
-
-**Made with ❤️ for F1 fans**
-
-🏁 *Enjoy predicting F1 races!* 🏁
-
-</div>
+*Note: This project is unofficial and not associated in any way with the Formula 1 companies. F1, FORMULA ONE, FORMULA 1, FIA FORMULA ONE WORLD CHAMPIONSHIP, GRAND PRIX and related marks are trade marks of Formula One Licensing B.V.*

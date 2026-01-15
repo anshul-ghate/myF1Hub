@@ -11,6 +11,7 @@ import fastf1
 import pandas as pd
 from datetime import datetime
 import os
+from utils.time_simulation import get_current_time, get_current_year
 
 # Page Config - must be first
 st.set_page_config(
@@ -33,6 +34,7 @@ local_css("app/assets/custom.css")
 # Render Sidebar
 from app.components.sidebar import render_sidebar
 render_sidebar()
+
 
 # Import visualization utilities
 from utils.race_visualization import (
@@ -94,8 +96,9 @@ def get_event_schedule(year: int, _cache_date: str = None):
         if 'EventDate' in schedule.columns:
             schedule['EventDate'] = pd.to_datetime(schedule['EventDate'], utc=True)
         
+        
         # Filter to only completed events (event date in the past)
-        now = datetime.now(pytz.utc)
+        now = get_current_time()
         schedule = schedule[schedule['EventDate'] < now]
         
         return schedule
@@ -104,8 +107,8 @@ def get_event_schedule(year: int, _cache_date: str = None):
         return pd.DataFrame()
 
 # Get today's date for cache key
-from datetime import date
-_today = str(date.today())
+# Get today's date for cache key
+_today = str(get_current_time().date())
 
 
 
@@ -141,8 +144,11 @@ st.markdown("---")
 col_year, col_race, col_session, col_load = st.columns([1, 2, 1, 1])
 
 with col_year:
-    # Available years (2025 is current season, include all back to 2019)
-    available_years = list(range(2025, 2018, -1))
+    # Available years (Dynamic based on current/simulated year)
+    current_year_val = get_current_year()
+    # Ensure at least 2025 is included if current year < 2025 (unlikely but safe)
+    max_year = max(current_year_val, 2025)
+    available_years = list(range(max_year, 2018, -1))
     selected_year = st.selectbox("📅 Year", available_years, index=0)
 
 with col_race:
@@ -176,22 +182,15 @@ with col_session:
 
 with col_load:
     st.write("")  # Spacer
-    # Load mode selection
-    load_mode = st.radio(
-        "Mode",
-        ["⚡ Fast", "🎯 Full"],
-        horizontal=True,
-        help="Fast: Instant load, approximate positions. Full: Accurate telemetry, ~30s load time.",
-        label_visibility="collapsed"
-    )
-    full_mode = load_mode == "🎯 Full"
+    st.write("")  # Spacer
     
-    load_button = st.button("🔄 Load Race", type="primary", 
+    load_button = st.button("🔄 Load Race", type="primary", width="stretch",
                             disabled=(selected_round is None))
 
 # Check if we need to load new data
 if selected_round is not None:
-    current_key = f"{selected_year}_{selected_round}_{session_code}_{load_mode}"
+    # Key no longer depends on mode (always "full/cached")
+    current_key = f"{selected_year}_{selected_round}_{session_code}"
     
     if load_button or (st.session_state.past_race_key != current_key and st.session_state.past_race_data is None):
         if load_button:
@@ -203,15 +202,18 @@ if selected_round is not None:
             import time as time_module
             start_time = time_module.time()
             
-            mode_text = "with full telemetry" if full_mode else "in fast mode"
-            with st.spinner(f"Loading {selected_session} data {mode_text}..."):
+            with st.spinner(f"Loading {selected_session} data..."):
                 try:
-                    data = get_race_telemetry_frames(selected_year, selected_round, session_code, full_mode=full_mode)
+                    # Always request full_mode=True (which now tries DB cache first)
+                    data = get_race_telemetry_frames(selected_year, selected_round, session_code, full_mode=True)
                     st.session_state.past_race_data = data
                     
                     elapsed = time_module.time() - start_time
-                    cache_msg = " (from cache)" if data.get('_from_cache') else ""
-                    st.success(f"✅ Loaded {data['event_name']} - {data['total_laps']} laps, {len(data['frames'])} frames in {elapsed:.1f}s{cache_msg}")
+                    
+                    # Determine source
+                    source = "Supabase Cache ⚡" if data.get('_from_cache') else "F1 API (Live Compute)"
+                    st.success(f"✅ Loaded {data['event_name']} via {source} in {elapsed:.1f}s")
+                    
                 except Exception as e:
                     st.error(f"Failed to load race data: {e}")
                     st.session_state.past_race_data = None
@@ -348,7 +350,7 @@ if race_data and race_data.get("frames"):
                 driver_colors=driver_colors,
                 height=250
             )
-            st.plotly_chart(pos_fig, width='stretch')
+            st.plotly_chart(pos_fig, width="stretch")
     
     # ---------- AUTO-PLAY LOGIC ----------
     if st.session_state.past_race_playing:

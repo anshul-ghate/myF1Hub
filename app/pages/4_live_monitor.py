@@ -15,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 import os
 import pytz
 from utils.logger import get_logger
+from utils.time_simulation import get_current_time
 
 logger = get_logger(__name__)
 
@@ -39,6 +40,7 @@ local_css("app/assets/custom.css")
 # Render Sidebar
 from app.components.sidebar import render_sidebar
 render_sidebar()
+
 
 # Import visualization utilities
 from utils.race_visualization import (
@@ -159,7 +161,7 @@ def get_live_weather():
 def check_upcoming_session():
     """Check if there's an upcoming session soon."""
     try:
-        now = datetime.now(pytz.utc)
+        now = get_current_time()
         schedule = fastf1.get_event_schedule(now.year)
         
         for _, event in schedule.iterrows():

@@ -59,30 +59,30 @@ class ModelRegistry:
                 # Log Model based on type
                 if model_type == "sklearn":
                     mlflow.sklearn.log_model(
-                        model, 
-                        "model",
+                        sk_model=model, 
+                        name="model",
                         registered_model_name=model_name if register_model else None,
                         input_example=input_example
                     )
                 elif model_type == "lightgbm":
                     mlflow.lightgbm.log_model(
-                        model, 
-                        "model", 
+                        lgbm_model=model, 
+                        name="model", 
                         registered_model_name=model_name if register_model else None,
                         input_example=input_example
                     )
                 elif model_type == "xgboost":
                     mlflow.xgboost.log_model(
-                        model, 
-                        "model", 
+                        xgb_model=model, 
+                        name="model", 
                         registered_model_name=model_name if register_model else None,
                         input_example=input_example
                     )
                 else:
                     # Fallback to generic pyfunc or pickle
                     mlflow.sklearn.log_model(
-                        model, 
-                        "model", 
+                        sk_model=model, 
+                        name="model", 
                         registered_model_name=model_name if register_model else None
                     )
                 
@@ -161,6 +161,17 @@ class ModelRegistry:
                 return mlflow.pyfunc.load_model(model_uri)
         except Exception as e:
             logger.error(f"Failed to load native model {model_name} (flavor: {flavor}): {e}")
+            return None
+
+    def get_model_metadata(self, model_name: str, stage: str = "Production") -> Optional[Any]:
+        """Get metadata for a specific model stage."""
+        try:
+            latest = self.client.get_latest_versions(model_name, stages=[stage])
+            if not latest:
+                return None
+            return latest[0]
+        except Exception as e:
+            logger.error(f"Failed to get metadata for {model_name}: {e}")
             return None
 
     def transition_stage(self, model_name: str, version: int, stage: str):

@@ -10,7 +10,7 @@ def configure_fastf1_retries():
     """
     retry_strategy = Retry(
         total=10,  # High retry count for rate limits
-        backoff_factor=1,  # 1s, 2s, 4s, 8s...
+        backoff_factor=2,  # 2s, 4s, 8s, 16s... (Exponential)
         status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["HEAD", "GET", "OPTIONS"],
         raise_on_status=False

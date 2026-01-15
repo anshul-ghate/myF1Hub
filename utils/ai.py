@@ -1,13 +1,11 @@
 import os
 import google.generativeai as genai
-from dotenv import load_dotenv
 from utils.db import get_supabase_client
+from utils.config import get_secret
 import pandas as pd
 
-load_dotenv()
-
 # Configure Gemini
-api_key = os.getenv("GOOGLE_API_KEY")
+api_key = get_secret("GOOGLE_API_KEY")
 if api_key:
     genai.configure(api_key=api_key)
 
@@ -80,6 +78,26 @@ class RaceEngineer:
         except Exception as e:
             return None
 
+    
+    def analyze_commentary(self, commentary_text):
+        """Analyzes race commentary to extract strategic insights."""
+        prompt = f"""
+        Analyze the following F1 commentary log. Identify key events, strategy shifts, and driver sentiment.
+        
+        Commentary:
+        {commentary_text}
+        
+        Output format:
+        - Critical Events: [List]
+        - Tyre Strategy Indicators: [List]
+        - Driver Complaints/Feedback: [List]
+        """
+        try:
+            response = self.chat.send_message(prompt)
+            return response.text
+        except Exception as e:
+            return f"Commentary analysis failed: {e}"
+
     def ask(self, user_query):
         if not api_key:
             return "⚠️ AI Configuration Error: GOOGLE_API_KEY not found."
@@ -92,33 +110,34 @@ class RaceEngineer:
         
         data_context = ""
         if sql and "SELECT" in sql.upper() and "NO_SQL" not in sql:
-            try:
-                # Execute SQL (Safe read-only execution ideally, but using raw for now)
-                # Supabase-py doesn't support raw SQL easily without RPC.
-                # Workaround: We will use the 'rpc' if available or just rely on the LLM to explain if we can't run it.
-                # Actually, for this demo, let's use a simplified approach:
-                # We will ask the LLM to construct a Supabase-like filter or just answer from general knowledge if SQL fails.
-                # WAIT: We can't easily run raw SQL via the JS/Python client unless we have a postgres function.
-                # ALTERNATIVE: We will use the LLM to generate a natural language answer based on its internal knowledge 
-                # AND we will try to fetch basic stats if possible.
-                
-                # REVISION: Since we can't run raw SQL easily, let's make the agent "simulate" the engineer 
-                # by giving it access to the *latest* race data context we can fetch easily.
-                pass
-            except Exception as e:
-                data_context = f"Could not execute DB query: {e}"
+            # For now, we simulate the data context or just log the intent.
+            # Real implementation would execute this safely.
+            data_context = f"[Internal: Generated SQL for context: {sql}]"
 
-        # 2. Final Answer
+        # 2. Final Answer with specialized persona (Olof)
+        # We inject a rich system prompt for every turn to ensure persona persistence
         prompt = f"""
-        You are an expert F1 Race Engineer named "Olof".
+        Role: You are Olof, an elite Formula 1 Race Strategy Engineer & Data Scientist. 
+        You speak with the precision of a Mercedes/Red Bull engineer but the accessibility of a Sky Sports analyst.
+        
+        Key Traits:
+        - Technical but clear.
+        - Uses correct F1 terminology (undercut, overcut, graining, blistering, delta, lift-and-coast).
+        - Knowledgeable about F1 history, regulations, and current season dynamics.
+        
+        Context:
+        {self.schema_context}
+        {data_context}
         
         User Question: {user_query}
         
-        {self.schema_context}
+        Instructions:
+        - If the user asks about specific data, explain how you would retrieve it (referencing tables).
+        - If the user asks for opinion, give a data-backed perspective.
+        - Keep answers concise unless asked for deep analysis.
+        - If analyzing commentary/strategy, look for patterns in lap times and gaps.
         
-        If you need specific data that you can't access, explain what query you would run.
-        Otherwise, answer to the best of your ability using your training data and F1 knowledge.
-        Be helpful, technical, and concise.
+        Response:
         """
         try:
             response = self.chat.send_message(prompt)

@@ -9,7 +9,9 @@ import base64
 
 import requests
 from requests.adapters import HTTPAdapter
+from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from utils.time_simulation import get_current_time
 
 # Initialize Supabase
 supabase = get_supabase_client()
@@ -138,7 +140,7 @@ def get_next_upcoming_race():
     """
     try:
         # Get current date in UTC
-        now = datetime.now(timezone.utc)
+        now = get_current_time()
         
         # Fetch races with date information, ordered by date
         # Note: schema_v3 uses 'race_date' column, not 'date'
@@ -244,12 +246,16 @@ def get_current_standings(year=None):
     Fetch current driver and constructor standings by aggregating results from all completed races.
     """
     if year is None:
-        year = datetime.now().year
+        year = get_current_time().year
         
     try:
         # Get schedule
         schedule = fastf1.get_event_schedule(year)
-        completed = schedule[schedule['EventDate'] < datetime.now()]
+        # Ensure EventDate is timezone-aware for comparison
+        if 'EventDate' in schedule.columns:
+            schedule['EventDate'] = pd.to_datetime(schedule['EventDate'], utc=True)
+            
+        completed = schedule[schedule['EventDate'] < get_current_time()]
         
         driver_points = {}
         driver_teams = {}
@@ -330,7 +336,7 @@ def get_latest_completed_session():
     Returns dict with session details.
     """
     try:
-        now = datetime.now(timezone.utc)
+        now = get_current_time()
         year = now.year
         
         # Get schedule for current year
@@ -405,7 +411,7 @@ def get_session_status(year, round_num):
             return {}
             
         event = event.iloc[0]
-        now = datetime.now(timezone.utc)
+        now = get_current_time()
         status = {}
         
         for i in range(1, 6):

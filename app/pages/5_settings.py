@@ -43,7 +43,21 @@ def get_current_theme():
 
 def set_theme(mode):
     try:
+        # Check if change is needed first
+        current = get_current_theme()
+        if (mode == "light" and current == "light") or (mode == "dark" and current == "dark"):
+            return True
+
+        if not os.path.exists(CONFIG_FILE):
+             st.error("Config file not found.")
+             return False
+
         config = toml.load(CONFIG_FILE)
+        
+        # Ensure section exists
+        if "theme" not in config:
+            config["theme"] = {}
+
         if mode == "light":
             config["theme"]["primaryColor"] = "#FF1801"
             config["theme"]["backgroundColor"] = "#FFFFFF"
@@ -61,6 +75,7 @@ def set_theme(mode):
     except Exception as e:
         st.error(f"Failed to update theme: {e}")
         return False
+
 
 # --- UI ---
 

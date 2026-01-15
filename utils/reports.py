@@ -1,11 +1,11 @@
 import os
 import google.generativeai as genai
-from dotenv import load_dotenv
 from utils.db import get_supabase_client
+from utils.config import get_secret
 import pandas as pd
 
-load_dotenv()
-api_key = os.getenv("GOOGLE_API_KEY")
+# Configure Gemini
+api_key = get_secret("GOOGLE_API_KEY")
 if api_key:
     genai.configure(api_key=api_key)
 

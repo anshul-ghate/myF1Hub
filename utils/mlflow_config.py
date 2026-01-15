@@ -2,12 +2,13 @@ import mlflow
 import os
 from pathlib import Path
 from utils.logger import get_logger
+from utils.config import get_secret
 
 logger = get_logger("MLflowConfig")
 
 # Configuration
-MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns")
-EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME", "F1_PitWall_AI")
+MLFLOW_TRACKING_URI = get_secret("MLFLOW_TRACKING_URI", "file:./mlruns")
+EXPERIMENT_NAME = get_secret("MLFLOW_EXPERIMENT_NAME", "F1_PitWall_AI")
 
 def configure_mlflow():
     """

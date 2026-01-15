@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Callable
 from contextlib import contextmanager
 import threading
+import queue
 
 # Thread-local storage for correlation ID
 _context = threading.local()
@@ -137,6 +138,7 @@ class SupabaseHandler(logging.Handler):
     """
     Handler that sends logs to Supabase database.
     Batches logs and sends asynchronously to avoid blocking.
+    Uses a background worker thread.
     """
     
     def __init__(self, component_name: str, min_level: int = logging.WARNING):
@@ -144,6 +146,15 @@ class SupabaseHandler(logging.Handler):
         self.component = component_name
         self.setLevel(min_level)  # Only log warnings and above to DB
         self._supabase = None
+        
+        # Async setup
+        import queue
+        import threading
+        
+        self.log_queue = queue.Queue(maxsize=1000)
+        self.stop_event = threading.Event()
+        self.worker_thread = threading.Thread(target=self._worker, daemon=True)
+        self.worker_thread.start()
     
     @property
     def supabase(self):
@@ -155,10 +166,36 @@ class SupabaseHandler(logging.Handler):
             except Exception:
                 pass
         return self._supabase
-    
+
+    def _worker(self):
+        """Background worker to process logs from queue."""
+        import sys
+        
+        while not self.stop_event.is_set():
+            try:
+                # Wait for log entry, check stop event periodically
+                log_entry = self.log_queue.get(timeout=2.0)
+                
+                # We have an entry, process it
+                if self.supabase:
+                    try:
+                        # Process batching here could be added later for efficiency
+                        # For now, 1:1 insert
+                        self.supabase.table("app_logs").insert(log_entry).execute()
+                    except Exception as e:
+                        # Fallback
+                        print(f"FAILED TO SEND ASYNC LOG: {e}", file=sys.stderr)
+                
+                self.log_queue.task_done()
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"Logger Worker Error: {e}", file=sys.stderr)
+
     def emit(self, record: logging.LogRecord):
-        if self.supabase is None:
-            return
+        # Don't check for self.supabase here, let the worker handle eager/lazy loading
+        # to avoid blocking on module imports or connection delays on the main thread
         
         try:
             log_entry = {
@@ -182,13 +219,23 @@ class SupabaseHandler(logging.Handler):
                 if hasattr(exc, 'to_dict'):
                     log_entry["metadata"]["exception_details"] = exc.to_dict()
             
-            # Fire and forget
-            self.supabase.table("app_logs").insert(log_entry).execute()
+            # Put on queue (non-blocking if not full)
+            try:
+                self.log_queue.put_nowait(log_entry)
+            except queue.Full:
+                import sys
+                print("Log queue full, dropping log", file=sys.stderr)
             
         except Exception as e:
             # Fallback to stderr to avoid infinite recursion
             import sys
-            print(f"Failed to log to Supabase: {e}", file=sys.stderr)
+            print(f"Failed to queue log to Supabase: {e}", file=sys.stderr)
+            
+    def close(self):
+        self.stop_event.set()
+        if self.worker_thread.is_alive():
+            self.worker_thread.join(timeout=1.0)
+        super().close()
 
 
 def get_logger(name: str, level: int = logging.INFO, json_format: bool = False) -> ContextLogger:

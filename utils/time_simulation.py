@@ -68,61 +68,6 @@ def get_current_year() -> int:
     return get_current_time().year
 
 
-def render_debug_panel():
-    """
-    Render debug controls in sidebar.
-    Only shown when F1_DEBUG_MODE is enabled.
-    """
-    if not is_debug_mode():
-        return
-    
-    with st.sidebar:
-        st.markdown("---")
-        with st.expander("🛠️ Debug Mode", expanded=True):
-            st.warning("Debug mode is active!")
-            
-            current_time = get_current_time()
-            st.markdown(f"**Simulated Time:**")
-            st.code(current_time.strftime("%Y-%m-%d %H:%M:%S %Z"))
-            
-            st.markdown("---")
-            st.markdown("**Quick Time Presets:**")
-            
-            preset_times = {
-                "2024 Abu Dhabi GP (Race Start)": "2024-12-08T13:00:00+00:00",
-                "2024 Abu Dhabi GP (Qualifying)": "2024-12-07T14:00:00+00:00",
-                "2024 Las Vegas GP (Race)": "2024-11-24T06:00:00+00:00",
-                "2024 Brasil GP (Race)": "2024-11-03T14:00:00+00:00",
-                "Pre-Season 2025": "2025-02-20T10:00:00+00:00",
-            }
-            
-            selected_preset = st.selectbox(
-                "Select Time Preset",
-                ["(Current simulation)"] + list(preset_times.keys())
-            )
-            
-            if selected_preset != "(Current simulation)":
-                new_time = preset_times[selected_preset]
-                st.code(f"$env:F1_SIMULATED_DATE = \"{new_time}\"")
-                st.caption("Copy this command and restart the app to use this preset.")
-            
-            st.markdown("---")
-            st.markdown("**Custom Time:**")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                custom_date = st.date_input("Date", current_time.date())
-            with col2:
-                custom_time = st.time_input("Time", current_time.time())
-            
-            if st.button("📋 Copy Command"):
-                combined = datetime.datetime.combine(custom_date, custom_time)
-                combined_str = combined.strftime("%Y-%m-%dT%H:%M:%S+00:00")
-                st.code(f"$env:F1_SIMULATED_DATE = \"{combined_str}\"")
-                st.caption("Copy this command and restart the app.")
-            
-            st.markdown("---")
-            st.caption("To disable debug mode, remove the F1_DEBUG_MODE environment variable.")
 
 
 def get_race_weekend_status(race_date: datetime.datetime, 

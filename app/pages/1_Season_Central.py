@@ -15,6 +15,7 @@ from utils.race_utils import (
     get_track_map_image
 )
 from app.components.sidebar import render_sidebar
+from utils.time_simulation import get_current_time, get_current_year
 
 # Inject Custom CSS
 def local_css(file_name):
@@ -28,6 +29,7 @@ local_css("app/assets/custom.css")
 
 # Render Sidebar
 render_sidebar()
+
 
 # Initialize Engine with error handling
 @st.cache_resource
@@ -65,24 +67,33 @@ def highlight_team(row):
     return [f'border-left: 5px solid {color}' for _ in row]
 
 # --- HEADER ---
-current_year = datetime.datetime.now().year
+current_year = get_current_year()
 st.title(f"🏁 F1 {current_year} Season Central")
 
 # --- 1. CURRENT RACE WEEKEND ---
 st.subheader("📅 Current Race Weekend")
 
 # Get Schedule
-schedule = fastf1.get_event_schedule(current_year)
-now_utc = datetime.datetime.now(pytz.utc)
+try:
+    schedule = fastf1.get_event_schedule(current_year)
+except Exception as e:
+    st.error(f"Could not load schedule for {current_year}: {e}")
+    schedule = pd.DataFrame()
+
+now_utc = get_current_time()
 
 # Find next or active race (EventDate + 1 day buffer)
 # Ensure columns are datetime
-for col in ['EventDate', 'Session1Date', 'Session2Date', 'Session3Date', 'Session4Date', 'Session5Date']:
-    if col in schedule.columns:
-        schedule[col] = pd.to_datetime(schedule[col], utc=True)
+if not schedule.empty:
+    for col in ['EventDate', 'Session1Date', 'Session2Date', 'Session3Date', 'Session4Date', 'Session5Date']:
+        if col in schedule.columns:
+            schedule[col] = pd.to_datetime(schedule[col], utc=True)
 
 # Filter for future or recent events (within 3 days past)
-upcoming = schedule[schedule['EventDate'] + datetime.timedelta(days=3) > now_utc]
+if not schedule.empty and 'EventDate' in schedule.columns:
+    upcoming = schedule[schedule['EventDate'] + datetime.timedelta(days=3) > now_utc]
+else:
+    upcoming = pd.DataFrame()
 
 if not upcoming.empty:
     next_event = upcoming.iloc[0]
@@ -147,7 +158,10 @@ if not upcoming.empty:
 
 else:
     # Fallback: Show most recent completed event (off-season)
-    completed = schedule[schedule['EventDate'] < now_utc]
+    if not schedule.empty and 'EventDate' in schedule.columns:
+        completed = schedule[schedule['EventDate'] < now_utc]
+    else:
+        completed = pd.DataFrame()
     
     if not completed.empty:
         next_event = completed.iloc[-1]  # Most recent completed

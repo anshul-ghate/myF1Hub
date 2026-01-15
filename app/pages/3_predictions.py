@@ -11,6 +11,7 @@ from utils.db import get_supabase_client
 from utils.race_utils import get_next_upcoming_race, get_seasons, get_rounds_for_season, get_race_lap_count, get_race_by_id
 from app.components.sidebar import render_sidebar
 
+
 # Inject Custom CSS
 def local_css(file_name):
     try:
@@ -23,6 +24,7 @@ local_css("app/assets/custom.css")
 
 # Render Sidebar
 render_sidebar()
+
 
 # Lazy import heavy modules to improve page load time
 @st.cache_resource
@@ -49,7 +51,7 @@ if st.sidebar.button("🔄 Reload Predictor"):
     
 engine = st.session_state['predictor']
 
-st.title("🏁 F1 Hybrid Prediction Engine v8.0")
+st.title("🏁 F1 Hybrid Prediction Engine")
 
 # Check if engine is available
 if engine is None:
@@ -83,7 +85,7 @@ if selection_method == "🔥 Next Upcoming Race":
         selected_race_name = next_race['name']
         
         # Display next race info
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3 = st.columns([4, 1, 1])
         with col1:
             st.metric("Race", next_race.get('name', 'Unknown'))
         with col2:
@@ -91,7 +93,13 @@ if selection_method == "🔥 Next Upcoming Race":
         with col3:
             st.metric("Round", next_race.get('round', 'N/A'))
         
-        st.info(f"📍 **Circuit**: {next_race.get('circuit_name', 'Unknown')} | 📅 **Date**: {next_race.get('race_date', 'TBD')}")
+        # Try multiple keys for circuit name
+        # Use Location (e.g. "Yas Marina") to match Season Central, as 'circuit_name' in DB might describe the Event
+        location = next_race.get('Location') or next_race.get('circuit_name') or 'Unknown Location'
+        country = next_race.get('Country') or ''
+        
+        circuit_display = f"{location}, {country}" if country else location
+        st.info(f"📍 **Circuit**: {circuit_display} | 📅 **Date**: {next_race.get('race_date', 'TBD')}")
     else:
         st.warning("No upcoming races found in the database. Please select manually.")
         selection_method = "📅 Select by Season & Round"
@@ -133,7 +141,7 @@ if selected_race_id:
     st.markdown("---")
     st.subheader("🎯 Race Result Predictions")
     
-    st.info(f"**Engine**: Hybrid v8.0 (Multi-Model Ensemble + Monte Carlo) | **Powered by**: LightGBM Ranker + XGBoost + Enhanced Features")
+    st.info(f"**Engine**: Hybrid (Multi-Model Ensemble + Monte Carlo) | **Powered by**: LightGBM Ranker + XGBoost + Enhanced Features")
     
     # Simulation parameters
     col_sim1, col_sim2, col_sim3 = st.columns(3)
@@ -236,7 +244,7 @@ if selected_race_id:
                             'Avg Pos': '{:.1f}'
                         }).background_gradient(subset=['Win %'], cmap='RdYlGn')
                           .background_gradient(subset=['Podium %'], cmap='Blues'),
-                        use_container_width=True,
+                        width="stretch",
                         height=600
                     )
                     

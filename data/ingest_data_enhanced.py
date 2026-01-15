@@ -29,9 +29,9 @@ from utils.schemas import (
 from utils.api_config import configure_fastf1_retries
 
 # Enable cache
-if not os.path.exists('cache'):
-    os.makedirs('cache')
-fastf1.Cache.enable_cache('cache')
+if not os.path.exists('f1_cache'):
+    os.makedirs('f1_cache')
+fastf1.Cache.enable_cache('f1_cache')
 
 # Configure Retries
 configure_fastf1_retries()
@@ -138,7 +138,14 @@ def ingest_enhanced_race_data(year: int, race_round: int):
         # 7. Process Results
         _process_results(session, race_id, driver_map)
         
-        # 8. Mark Complete
+        # 8. Process Telemetry Cache (Instant Load)
+        if session.f1_api_support: # Only for sessions with F1 API support
+            try:
+                _process_telemetry_cache(session, race_id, year, race_round)
+            except Exception as e:
+                logger.error(f"Failed to process telemetry cache: {e}")
+
+        # 9. Mark Complete
         try:
             supabase.table('races').update({'ingestion_status': 'COMPLETE', 'updated_at': 'now()'}).eq('id', race_id).execute()
             logger.info(f"Enhanced Ingestion complete for {year} Round {race_round}")
@@ -402,6 +409,117 @@ def _process_pit_stops(session, race_id, driver_map):
             supabase.table('pit_stops').insert(stops).execute()
         except Exception as e:
             logger.error(f"Error inserting pit stops: {e}")
+
+
+def _process_telemetry_cache(session, race_id, year, round_num):
+    """
+    Pre-compute visualization frames and store in DB for instant loading.
+    Uses zlib compression to minimize storage.
+    """
+    logger.info("Processing Telemetry Cache (Supabase)...")
+    from utils.race_visualization import build_race_frames, get_driver_colors, get_circuit_rotation, _get_track_statuses, _build_frames_fast_mode
+    import zlib
+    import json
+    
+    drivers = session.drivers
+    laps = session.laps
+    
+    if laps.empty: return
+
+    # Get driver codes
+    driver_codes = {}
+    for num in drivers:
+        try:
+            driver_codes[num] = session.get_driver(num)["Abbreviation"]
+        except:
+            driver_codes[num] = f"#{num}"
+            
+    max_lap = int(laps['LapNumber'].max())
+    
+    # Build frames (FULL MODE)
+    # Note: We force FULL mode computation here
+    try:
+        frames = build_race_frames(session, drivers, driver_codes, max_lap)
+    except Exception as e:
+        logger.warning(f"Full telemetry build failed, falling back to fast mode: {e}")
+        frames = _build_frames_fast_mode(session, drivers, driver_codes, laps, max_lap)
+    
+    if not frames:
+        logger.warning("No frames generated")
+        return
+
+    # Prepare data object
+    result = {
+        "frames": frames,
+        "driver_colors": get_driver_colors(session),
+        "track_statuses": _get_track_statuses(session), # Track status list
+        "total_laps": max_lap,
+        "circuit_rotation": get_circuit_rotation(session),
+        "event_name": session.event['EventName']
+    }
+    
+    # Get track coordinates (same logic as visualization)
+    try:
+        fastest = laps.pick_fastest()
+        if fastest is not None:
+             tel = fastest.get_telemetry()
+             if tel is not None and not tel.empty and 'X' in tel.columns:
+                 result["track_coords"] = {
+                     "x": tel['X'].iloc[::5].tolist(),
+                     "y": tel['Y'].iloc[::5].tolist()
+                 }
+             else:
+                 result["track_coords"] = {"x": [], "y": []}
+    except:
+        result["track_coords"] = {"x": [], "y": []}
+
+    # Compress frames_data (the large part)
+    # We strip frames out of result to compress separately if needed, 
+    # but the schema expects `frames_data` as bytea.
+    # Actually, let's look at the schema plan: "frames_data BYTEA"
+    # So we compress the LIST of frames.
+    
+    frames_json = json.dumps(frames)
+    frames_compressed = zlib.compress(frames_json.encode('utf-8'), level=9)
+    
+    # Upsert to DB
+    data = {
+        'race_id': race_id,
+        'session_type': 'R', # Assuming Race for now
+        'total_laps': max_lap,
+        'total_frames': len(frames),
+        'driver_colors': result['driver_colors'],
+        'track_coords': result['track_coords'],
+        'circuit_rotation': float(result['circuit_rotation']),
+        'event_name': result['event_name'],
+        'track_statuses': result['track_statuses'], # Added field
+        'season_year': year, # Add year/round for easier querying
+        'round': round_num,
+        'frames_data': frames_compressed.hex() # Send as hex string for bytea compatibility via PostgREST
+    }
+    
+    # Use simple Insert (Upsert needs conflict handling)
+    # Use simple Insert (Upsert needs conflict handling)
+    # Conflict on (race_id, session_type)
+    
+    # Retry logic for Supabase 5xx errors
+    import time
+    max_retries = 3
+    
+    for attempt in range(max_retries):
+        try:
+            supabase.table('race_telemetry_cache').upsert(data, on_conflict='race_id, session_type').execute()
+            logger.info(f"Telemetry cache stored for {year} R{round_num} ({len(frames)} frames)")
+            break
+        except Exception as e:
+            error_str = str(e)
+            if attempt < max_retries - 1 and ('520' in error_str or '521' in error_str or '500' in error_str or 'JSON' in error_str):
+                delay = 5 * (attempt + 1)
+                logger.warning(f"Supabase upsert failed (Attempt {attempt+1}/{max_retries}): {e}. Retrying in {delay}s...")
+                time.sleep(delay)
+            else:
+                logger.error(f"Failed to upsert telemetry cache after {max_retries} attempts: {e}")
+                raise e
 
 
 def _bulk_upsert(table, data, conflict_columns):

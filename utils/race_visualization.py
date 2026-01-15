@@ -28,7 +28,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Constants
-FPS = 10  # Frames per second for replay
+FPS = 4  # Frames per second (reduced from 10 to 4 for payload size optimization)
 DT = 1 / FPS
 CACHE_DIR = "data/computed_telemetry"
 
@@ -212,17 +212,70 @@ def get_race_telemetry_frames(year: int, round_number: int, session_type: str = 
     """
     enable_cache()
     
-    # Check for cached computed data FIRST (instant load)
+    # 1. Check cached computed data (Local Pickle - Legacy/Fast)
     if not os.path.exists(CACHE_DIR):
         os.makedirs(CACHE_DIR)
     
+    # Check Supabase Cache FIRST (The new "Instant" way)
+    # We only check Supabase if full_mode is True (which is now default/only mode)
+    # But even if full_mode is False, checking Supabase is fast.
+    # Actually, we want to deprecate "Fast" mode eventually.
+    
+    try:
+        from utils.db import get_supabase_client
+        import zlib
+        import json
+        
+        supabase = get_supabase_client()
+        # Look for cache entry
+        # Ideally we'd validte against updated_at, but for past races it's static
+        res = supabase.table('race_telemetry_cache').select('frames_data, driver_colors, track_coords, track_statuses, circuit_rotation, event_name')\
+            .eq('season_year', year).eq('round', round_number).eq('session_type', session_type).execute()
+        
+        if res.data:
+            cached = res.data[0]
+            logger.info(f"⚡ Loading from Supabase Cache: {year} R{round_number}")
+            
+            # Decompress frames
+            frames_compressed = bytes.fromhex(cached['frames_data'][2:]) if cached['frames_data'].startswith('\\x') else cached['frames_data']
+            # Supabase returns bytea as hex string typically prefixed with \x, but python client might handle it.
+            # Actually, standard postgrest python client returns it as string or bytes depending on config.
+            # Let's assume standard handling or handle string \x manually
+            
+            if isinstance(cached['frames_data'], str) and cached['frames_data'].startswith('\\x'):
+                 frames_bytes = bytes.fromhex(cached['frames_data'][2:])
+            elif isinstance(cached['frames_data'], str):
+                 # Try latin1 fallback or assume it's raw
+                 try:
+                     frames_bytes = bytes.fromhex(cached['frames_data'])
+                 except:
+                     frames_bytes = cached['frames_data'].encode('latin1') # Binary string
+            else:
+                 frames_bytes = cached['frames_data']
+            
+            frames = json.loads(zlib.decompress(frames_bytes))
+            
+            return {
+                "frames": frames,
+                "driver_colors": cached['driver_colors'] or {},
+                "track_statuses": cached['track_statuses'] or [],
+                "total_laps": cached.get('total_laps', 0) or frames[-1]['lap'],
+                "track_coords": cached['track_coords'] or {"x": [], "y": []},
+                "circuit_rotation": cached.get('circuit_rotation', 0.0),
+                "event_name": cached.get('event_name', f"{year} Round {round_number}"),
+                "_from_cache": True
+            }
+    except Exception as e:
+        logger.debug(f"Supabase cache miss/error: {e}")
+
+    # 2. Local File Cache (Fallback)
     mode_suffix = "full" if full_mode else "fast"
     cache_file = f"{CACHE_DIR}/{year}_R{round_number}_{session_type}_{mode_suffix}.pkl"
     
     if os.path.exists(cache_file) and not force_refresh:
         try:
             with open(cache_file, "rb") as f:
-                logger.info(f"⚡ Loading from cache: {cache_file}")
+                logger.info(f"⚡ Loading from Local Pickle: {cache_file}")
                 data = pickle.load(f)
                 data['_from_cache'] = True
                 return data
@@ -259,7 +312,7 @@ def get_race_telemetry_frames(year: int, round_number: int, session_type: str = 
     
     if full_mode:
         # FULL MODE: Load complete telemetry and resample
-        frames = _build_frames_full_mode(session, drivers, driver_codes, max_lap_number)
+        frames = build_race_frames(session, drivers, driver_codes, max_lap_number)
     else:
         # FAST MODE: Use lap-by-lap snapshots (original approach)
         frames = _build_frames_fast_mode(session, drivers, driver_codes, laps, max_lap_number)
@@ -301,7 +354,7 @@ def get_race_telemetry_frames(year: int, round_number: int, session_type: str = 
     return result
 
 
-def _build_frames_full_mode(session, drivers, driver_codes, max_lap_number) -> List[Dict]:
+def build_race_frames(session, drivers, driver_codes, max_lap_number) -> List[Dict]:
     """Build frames using full telemetry data - accurate driver positions."""
     
     logger.info(f"Processing {len(drivers)} drivers with full telemetry...")
@@ -393,20 +446,20 @@ def _build_frames_full_mode(session, drivers, driver_codes, max_lap_number) -> L
             position = idx + 1
             
             frame_data[code] = {
-                "x": car["x"],
-                "y": car["y"],
-                "dist": car["dist"],
+                "x": round(car["x"], 1),
+                "y": round(car["y"], 1),
+                "dist": round(car["dist"], 1),
                 "lap": car["lap"],
                 "rel_dist": round(car["rel_dist"], 4),
                 "tyre": car["tyre"],
                 "position": position,
-                "speed": car["speed"],
+                "speed": round(car["speed"], 1),
                 "gear": car["gear"],
                 "drs": car["drs"],
             }
         
         frames.append({
-            "t": round(t, 3),
+            "t": round(t, 2),
             "lap": leader_lap,
             "drivers": frame_data,
         })

@@ -2,6 +2,7 @@ import streamlit as st
 from utils.ai import RaceEngineer
 from app.components.sidebar import render_sidebar
 
+
 st.set_page_config(page_title="AI Race Engineer", page_icon="🤖", layout="wide")
 
 # Inject Custom CSS
@@ -13,6 +14,7 @@ local_css("app/assets/custom.css")
 
 # Render Sidebar
 render_sidebar()
+
 
 st.title("🤖 F1 Intellect: Race Engineer")
 st.markdown("Ask **Olof** anything about race strategy, historical data, or technical regulations.")

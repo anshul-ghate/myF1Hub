@@ -7,10 +7,12 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import fastf1
+import fastf1.plotting
 from datetime import datetime
 from utils.db import get_supabase_client
 from app.components.sidebar import render_sidebar
 from utils.logger import get_logger
+from utils.time_simulation import get_current_time, get_current_year
 
 logger = get_logger(__name__)
 
@@ -27,23 +29,25 @@ local_css("app/assets/custom.css")
 # Render Sidebar
 render_sidebar()
 
+
 supabase = get_supabase_client()
 
 @st.cache_data(ttl=3600)
-def get_available_years():
+def get_available_years(_simulated_time=None):
     """Get available years from FastF1 (2018+)"""
-    current_year = datetime.now().year
+    current_year = get_current_year()
+    # Assume we want to show up to the current simulated year
     return list(range(current_year, 2017, -1))  # 2018 to current year
 
 @st.cache_data(ttl=3600)
-def get_schedule_for_year(year):
+def get_schedule_for_year(year, _simulated_time=None):
     """Get race schedule for a given year"""
     try:
         schedule = fastf1.get_event_schedule(year)
         # Filter to completed events and exclude testing
         schedule = schedule[schedule['RoundNumber'] > 0]
-        schedule['EventDate'] = pd.to_datetime(schedule['EventDate'])
-        completed = schedule[schedule['EventDate'] < datetime.now()]
+        schedule['EventDate'] = pd.to_datetime(schedule['EventDate'], utc=True)
+        completed = schedule[schedule['EventDate'] < get_current_time()]
         return completed
     except Exception as e:
         logger.error(f"Failed to fetch schedule for {year}: {e}")
@@ -82,11 +86,13 @@ st.title("📈 Race Analytics")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    years = get_available_years()
+    # Pass current time to force cache invalidation on time change
+    current_sim_time = get_current_time()
+    years = get_available_years(_simulated_time=current_sim_time)
     selected_year = st.selectbox("🗓️ Season", years)
 
 with col2:
-    schedule = get_schedule_for_year(selected_year)
+    schedule = get_schedule_for_year(selected_year, _simulated_time=current_sim_time)
     if schedule.empty:
         st.warning(f"No completed races in {selected_year}")
         st.stop()
@@ -151,16 +157,45 @@ else:
         driver_col = 'Driver' if 'Driver' in clean_laps.columns else 'driver_code'
         color_col = 'Team' if 'Team' in clean_laps.columns else None
         
+        # Build dynamic color map using FastF1
+        team_color_map = {}
+        if color_col:
+            unique_teams = clean_laps[color_col].unique()
+            for team in unique_teams:
+                try:
+                    # fastf1.plotting.team_color returns hex (e.g. #ff0000)
+                    # We use a fallback just in case
+                    c = fastf1.plotting.team_color(team)
+                    team_color_map[team] = c
+                except:
+                    # Fallback to hardcoded map if FastF1 fails
+                    backup_colors = {
+                        'Red Bull Racing': '#0600EF', 'Red Bull': '#0600EF',
+                        'Mercedes': '#00D2BE',
+                        'Ferrari': '#DC0000',
+                        'McLaren': '#FF8700',
+                        'Aston Martin': '#006F62',
+                        'Alpine': '#0090FF',
+                        'Williams': '#005AFF',
+                        'RB': '#2B4562', 'AlphaTauri': '#2B4562', 'Toro Rosso': '#469BFF',
+                        'Haas F1 Team': '#FFFFFF', 'Haas': '#FFFFFF',
+                        'Kick Sauber': '#52E252', 'Sauber': '#52E252', 'Alfa Romeo': '#900000',
+                        'Racing Point': '#F596C8', 'Force India': '#F596C8',
+                        'Renault': '#FFF500'
+                    }
+                    team_color_map[team] = backup_colors.get(team, '#555555')
+
         # Box plot for lap time distribution
         if color_col:
             fig_box = px.box(clean_laps, x=driver_col, y='lap_time_s', color=color_col, 
                              title="Lap Time Distribution by Driver",
-                             labels={'lap_time_s': 'Lap Time (s)', driver_col: 'Driver'})
+                             labels={'lap_time_s': 'Lap Time (s)', driver_col: 'Driver'},
+                             color_discrete_map=team_color_map)
         else:
             fig_box = px.box(clean_laps, x=driver_col, y='lap_time_s', 
                              title="Lap Time Distribution by Driver",
                              labels={'lap_time_s': 'Lap Time (s)', driver_col: 'Driver'})
-        st.plotly_chart(fig_box, use_container_width=True)
+        st.plotly_chart(fig_box,  width="stretch")
 
         # 2. Tyre Strategy
         st.subheader("Tyre Strategy")
@@ -172,7 +207,7 @@ else:
                                   title="Tyre Compound Usage per Lap",
                                   labels={lap_num_col: 'Lap Number', driver_col: 'Driver'})
             fig_tyre.update_traces(marker=dict(size=8))
-            st.plotly_chart(fig_tyre, use_container_width=True)
+            st.plotly_chart(fig_tyre,  width="stretch")
         else:
             st.info("Tyre compound data not available for this session.")
 
@@ -205,7 +240,7 @@ else:
                                          paper_bgcolor='rgba(0,0,0,0)',
                                          plot_bgcolor='rgba(0,0,0,0)',
                                          font=dict(color='white'))
-                    st.plotly_chart(fig_3d, use_container_width=True)
+                    st.plotly_chart(fig_3d, width="stretch")
                     
                 else:  # Gear Shift Map
                     fig_3d = px.scatter_3d(tel, x='X', y='Y', z='Z', color='nGear',
@@ -218,7 +253,7 @@ else:
                                          paper_bgcolor='rgba(0,0,0,0)',
                                          plot_bgcolor='rgba(0,0,0,0)',
                                          font=dict(color='white'))
-                    st.plotly_chart(fig_3d, use_container_width=True)
+                    st.plotly_chart(fig_3d, width="stretch")
         else:
             st.error("Failed to load FastF1 session data.")
 
@@ -256,7 +291,7 @@ else:
                         
                         fig_comp.update_layout(title=f"Speed Comparison: {driver1} vs {driver2}", 
                                                xaxis_title="Distance (m)", yaxis_title="Speed (km/h)")
-                        st.plotly_chart(fig_comp, use_container_width=True)
+                        st.plotly_chart(fig_comp,  width="stretch")
                         
                         # Plot Delta
                         fig_delta = go.Figure()
@@ -265,7 +300,7 @@ else:
                         
                         fig_delta.update_layout(title=f"Time Delta: {driver2} relative to {driver1}", 
                                                 xaxis_title="Distance (m)", yaxis_title="Delta (s)")
-                        st.plotly_chart(fig_delta, use_container_width=True)
+                        st.plotly_chart(fig_delta,  width="stretch")
                         
                     else:
                         st.warning("One or both drivers do not have a valid fastest lap.")

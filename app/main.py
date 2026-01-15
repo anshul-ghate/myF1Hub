@@ -39,10 +39,7 @@ render_sidebar()
 
 # --- Logic for Next Race ---
 # Import time simulation for debug mode support
-from utils.time_simulation import get_current_time, is_debug_mode, render_debug_panel
-
-# Render debug panel if in debug mode
-render_debug_panel()
+from utils.time_simulation import get_current_time
 
 @st.cache_data(ttl=300)  # Reduced TTL to 5 mins for quicker season transition detection
 def get_schedule_with_fallback(_simulated_time=None):
@@ -153,7 +150,7 @@ if __name__ == "__main__":
 
     try:
         # Pass simulated time as cache buster for debug mode
-        simulated = get_current_time() if is_debug_mode() else None
+        simulated = None
         schedule, is_next_year, season_status = get_schedule_with_fallback(simulated)
         now_utc = get_current_time()
         
