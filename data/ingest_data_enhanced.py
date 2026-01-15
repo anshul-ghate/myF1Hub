@@ -36,7 +36,16 @@ fastf1.Cache.enable_cache('f1_cache')
 # Configure Retries
 configure_fastf1_retries()
 
-supabase = get_supabase_client()
+# Lazy supabase client - initialized on first use
+_supabase_client = None
+
+def _get_db():
+    """Get supabase client (lazy initialization)."""
+    global _supabase_client
+    if _supabase_client is None:
+        _supabase_client = get_supabase_client()
+    return _supabase_client
+
 logger = get_logger("DataIngestionEnhanced")
 
 # Global In-Memory Cache to reduce DB reads
@@ -58,7 +67,7 @@ def resolve_id(table: str, column: str, value: Any, data_if_missing: Optional[Di
 
     try:
         # 2. Try to find in DB
-        res = supabase.table(table).select("id").eq(column, value).execute()
+        res = _get_db().table(table).select("id").eq(column, value).execute()
         if res.data:
             uid = res.data[0]['id']
             if table in ID_CACHE: ID_CACHE[table][value] = uid
@@ -68,7 +77,7 @@ def resolve_id(table: str, column: str, value: Any, data_if_missing: Optional[Di
         if data_if_missing:
             try:
                 logger.info(f"Inserting new {table}: {value}", extra={"table": table, "value": value})
-                res = supabase.table(table).insert(data_if_missing).execute()
+                res = _get_db().table(table).insert(data_if_missing).execute()
                 if res.data:
                     uid = res.data[0]['id']
                     if table in ID_CACHE: ID_CACHE[table][value] = uid
@@ -76,7 +85,7 @@ def resolve_id(table: str, column: str, value: Any, data_if_missing: Optional[Di
             except Exception as e:
                 # 4. If insert fails (likely race condition), try to find again
                 logger.warning(f"Insert failed for {table} {value}, retrying fetch: {e}")
-                res = supabase.table(table).select("id").eq(column, value).execute()
+                res = _get_db().table(table).select("id").eq(column, value).execute()
                 if res.data:
                     uid = res.data[0]['id']
                     if table in ID_CACHE: ID_CACHE[table][value] = uid
@@ -116,7 +125,7 @@ def ingest_enhanced_race_data(year: int, race_round: int):
         # We need to reconstruct the race_data for resolve_id just in case, or just fetch ID
         # Assuming _ingest_basic_info handled creation, we just fetch ID
         try:
-            res = supabase.table('races').select('id').eq('ergast_race_id', race_ref).execute()
+            res = _get_db().table('races').select('id').eq('ergast_race_id', race_ref).execute()
             if not res.data:
                  raise IngestionError(f"Race {race_ref} not found after basic ingestion")
             race_id = res.data[0]['id']
@@ -147,7 +156,7 @@ def ingest_enhanced_race_data(year: int, race_round: int):
 
         # 9. Mark Complete
         try:
-            supabase.table('races').update({'ingestion_status': 'COMPLETE', 'updated_at': 'now()'}).eq('id', race_id).execute()
+            _get_db().table('races').update({'ingestion_status': 'COMPLETE', 'updated_at': 'now()'}).eq('id', race_id).execute()
             logger.info(f"Enhanced Ingestion complete for {year} Round {race_round}")
         except Exception as e:
             logger.error("Failed to mark ingestion complete", exc_info=True)
@@ -158,9 +167,9 @@ def _ingest_basic_info(session, year, race_round):
     try:
         # Season
         if year not in ID_CACHE['seasons']:
-            res = supabase.table('seasons').select('year').eq('year', year).execute()
+            res = _get_db().table('seasons').select('year').eq('year', year).execute()
             if not res.data:
-                supabase.table('seasons').insert({'year': year}).execute()
+                _get_db().table('seasons').insert({'year': year}).execute()
             ID_CACHE['seasons'][year] = True
 
         # Circuit
@@ -406,7 +415,7 @@ def _process_pit_stops(session, race_id, driver_map):
             
     if stops:
         try:
-            supabase.table('pit_stops').insert(stops).execute()
+            _get_db().table('pit_stops').insert(stops).execute()
         except Exception as e:
             logger.error(f"Error inserting pit stops: {e}")
 
@@ -508,7 +517,7 @@ def _process_telemetry_cache(session, race_id, year, round_num):
     
     for attempt in range(max_retries):
         try:
-            supabase.table('race_telemetry_cache').upsert(data, on_conflict='race_id, session_type').execute()
+            _get_db().table('race_telemetry_cache').upsert(data, on_conflict='race_id, session_type').execute()
             logger.info(f"Telemetry cache stored for {year} R{round_num} ({len(frames)} frames)")
             break
         except Exception as e:
@@ -535,7 +544,7 @@ def _bulk_upsert(table, data, conflict_columns):
         try:
             # Use upsert with ignore_duplicates=False to update on conflict
             # The on_conflict param should match the UNIQUE constraint columns
-            result = supabase.table(table).upsert(
+            result = _get_db().table(table).upsert(
                 chunk, 
                 on_conflict=conflict_columns,
                 ignore_duplicates=False
@@ -546,7 +555,7 @@ def _bulk_upsert(table, data, conflict_columns):
             logger.warning(f"Bulk upsert failed for {table}, trying individual inserts: {e}")
             for row in chunk:
                 try:
-                    supabase.table(table).upsert(row, on_conflict=conflict_columns).execute()
+                    _get_db().table(table).upsert(row, on_conflict=conflict_columns).execute()
                     inserted += 1
                 except Exception as row_e:
                     logger.debug(f"Row insert failed: {row_e}")
@@ -599,10 +608,10 @@ def ingest_qualifying_results(year: int, race_round: int):
 
 def resolving_race_id_helper(race_ref, year, round_num):
     try:
-        res = supabase.table('races').select('id').eq('ergast_race_id', race_ref).execute()
+        res = _get_db().table('races').select('id').eq('ergast_race_id', race_ref).execute()
         if res.data: return res.data[0]['id']
         
-        res = supabase.table('races').select('id').eq('season_year', year).eq('round', round_num).execute()
+        res = _get_db().table('races').select('id').eq('season_year', year).eq('round', round_num).execute()
         if res.data: return res.data[0]['id']
     except:
         pass
