@@ -212,6 +212,9 @@ jobs:
           
           print('✅ All critical imports successful')
           "
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://mock.supabase.co' }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || 'mock-key' }}
       
       - name: Check Streamlit app syntax
         run: |
