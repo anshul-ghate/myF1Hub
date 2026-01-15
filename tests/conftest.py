@@ -2,38 +2,25 @@
 import pytest
 import os
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
-# --- 1. Mock Supabase BEFORE Imports ---
-# We need to mock utils.db.supabase and create_client to prevent connection attempts
+# --- 0. Add project root to sys.path for module discovery ---
+# This ensures 'models', 'utils', etc. can be imported in test files
+PROJECT_ROOT = Path(__file__).parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+# --- 1. Set Mock Env Vars EARLY (Before any imports) ---
+os.environ['SUPABASE_URL'] = 'https://mock.supabase.co'
+os.environ['SUPABASE_KEY'] = 'mock-key'
+
+# --- 2. Mock modules that cause side-effects on import ---
+
+# Mock 'supabase' package itself to prevent network calls
 sys.modules['supabase'] = MagicMock()
 sys.modules['gotrue'] = MagicMock()
 
-# Mock specific utilities that might be imported
-mock_supabase_client = MagicMock()
-mock_db_module = MagicMock()
-mock_db_module.get_supabase_client.return_value = mock_supabase_client
-mock_db_module.supabase = mock_supabase_client
-sys.modules['utils.db'] = mock_db_module
-
-# --- 2. Mock FastF1 ---
-# FastF1 often tries to hit the internet or create cache dirs
-mock_fastf1 = MagicMock()
-mock_fastf1.Cache.enable_cache = MagicMock()
-sys.modules['fastf1'] = mock_fastf1
-
-# --- 3. Mock Env Vars ---
-@pytest.fixture(autouse=True)
-def mock_env():
-    """Set mock environment variables for all tests."""
-    os.environ['SUPABASE_URL'] = 'https://mock.supabase.co'
-    os.environ['SUPABASE_KEY'] = 'mock-key'
-    yield
-    if 'SUPABASE_URL' in os.environ:
-        del os.environ['SUPABASE_URL']
-    if 'SUPABASE_KEY' in os.environ:
-        del os.environ['SUPABASE_KEY']
-
 @pytest.fixture
 def mock_supabase():
-    return mock_supabase_client
+    return sys.modules['supabase']
