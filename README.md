@@ -3,7 +3,6 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Streamlit](https://img.shields.io/badge/streamlit-1.28%2B-FF4B4B)
-![Status](https://img.shields.io/badge/status-production--ready-green)
 
 **F1 PitWall AI** is a state-of-the-art predictive analytics platform for Formula 1, powered by hybrid machine learning models and real-time telemetry processing. It provides race engineers, strategists, and fans with professional-grade insights, live race monitoring, and "what-if" scenario simulation.
 
